@@ -1,0 +1,8 @@
+# Core dependencies
+google-genai>=1.0.0
+Pillow>=10.0.0
+tqdm>=4.66.0
+requests>=2.31.0
+
+# Optional: load .env files automatically
+python-dotenv>=1.0.0
