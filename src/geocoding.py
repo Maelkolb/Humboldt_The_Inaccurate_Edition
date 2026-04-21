@@ -5,7 +5,7 @@ Resolves Location entities to geographic coordinates and GeoNames IDs.
 
 Resolution order:
 1. Wikidata (primary) – returns coordinates + GeoNames ID + Wikidata QID
-2. Nominatim / OpenStreetMap (fallback) – coordinates only
+2. Nominatim / OpenStreetMap (fallback)
 
 """
 
