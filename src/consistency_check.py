@@ -56,7 +56,7 @@ PROBLEMS TO DETECT AND FIX:
    be in the margin appears mid-paragraph in the main text). Flag and move it.
 
 3. EMPTY REGIONS: A region has an empty or near-empty "content" (less than 5
-   characters) when it should contain text (is_visual=false). Note: if the
+   characters) when it should contain text (is_visual=false). Exception: marginal note on opposite folio, so cut off text in marginal notes should be empty. Note: if the
    region is genuinely empty in the image, keep it but note that.
 
 4. LANGUAGE MISMATCH: A region is labelled ["de"] but the content is clearly
