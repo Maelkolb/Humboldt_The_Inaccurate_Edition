@@ -50,8 +50,7 @@ def load_image_as_base64(image_path: str | Path) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 REGION_DETECTION_PROMPT = """\
-You are a specialist in Alexander von Humboldt's handwritten scientific journals
-(Amerikanische Reisetagebücher). You are examining a page from his field journals
+You are a specialist in Alexander von Humboldt's handwritten scientific journals. You are examining a page from his field journals
 written during his South American expedition (1799–1804), which features extremely
 complex, heterogeneous layouts with many co-existing text layers.
 
@@ -59,16 +58,11 @@ CHARACTERISTICS OF HUMBOLDT'S AMERICAN JOURNAL PAGES:
 - Entries are numbered (e.g. "50)", "N. 9-11", "N. 50-52") – one page may span
   multiple entries or continue one from the previous page.
 - Main text in German Kurrentschrift with frequent switches to French, Latin
-  (scientific nomenclature), and Spanish (Venezuelan place/species names).
+  (scientific nomenclature), and Spanish.
 - Margins contain notes in a different hand-size, sometimes rotated 90°,
   sometimes at top or bottom of the page, sometimes on the opposite side of the
   leaf (visible when the page is turned). These are important content, not
   decorative – they are Humboldt's own additions made at a different time.
-- Slips of paper (Zettel) are sometimes pasted onto the page: these are
-  physically separate pieces with their own content, often with a different ink.
-- Passages are marked with diagonal lines (Erledigt-Striche) to indicate that
-  Humboldt later used them in a published work. These differ from regular
-  strikethroughs (which correct text); usage marks span whole sections.
 - Astronomical/geodetic calculations appear as columns of numbers with ° ' "
   symbols, often in structured tables.
 - Pen sketches of mountain profiles, river courses, plant/animal diagrams appear
@@ -77,7 +71,7 @@ CHARACTERISTICS OF HUMBOLDT'S AMERICAN JOURNAL PAGES:
   paragraphs may also be struck through (deleted).
 - Text is added between lines (interlinear additions).
 - Reading order is NOT always top-to-bottom: marginalia relate to specific
-  passages, insertions are marked with reference signs (x, *, †, ‡).
+  passages, insertions are possible.
 
 REGION TYPES TO DETECT:
 - entry_heading: Numbered entry header (e.g. "N. 50-52.", "51)", "9)")
@@ -129,11 +123,11 @@ CRITICAL RULES:
    the larger region they belong to. Each region should be a meaningful block.
 
 5. BOUNDING BOXES: Make bboxes generous — slightly too large is better than
-   cutting off text. Add ~10–20 units of margin. The bbox for a marginal note
-   should tightly contain the marginal text, NOT the full page margin strip.
+   cutting off text. Add ~10 units of margin. The bbox for a marginal note
+   should tightly contain the marginal text.
 
 6. COHERENT BLOCKS: A continuous main_text passage should be ONE region, not
-   fragmented. Only split at genuine type changes (prose → calculation → prose).
+   fragmented. Only split at genuine type changes.
 
 7. READING ORDER: Return regions in the best reconstructable reading order.
    Start with page_number, then mTop marginal notes, then entry_heading, then
