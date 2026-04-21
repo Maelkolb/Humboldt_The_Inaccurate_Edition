@@ -64,7 +64,7 @@ BESONDERE HINWEISE FÜR HUMBOLDTS TEXTE:
    - Karten: "Güssfeld'sche Carte des Oestreich" → Publication
 
 5. UNSICHERE LESUNGEN [?]: Wenn ein Wort mit [?] markiert ist, trotzdem als
-   Entität erkennen, wenn der Kontext eindeutig ist. Z.B. "Salz[?]burg" ist
+   Entität erkennen, wenn der Kontext eindeutig ist. Z.B. "Sal[?]burg" ist
    wahrscheinlich "Salzburg" → Location. Gib die Form wie im Text an.
 
 6. MEHRSPRACHIGKEIT: Entitäten können in jeder Sprache erscheinen.
