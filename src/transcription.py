@@ -34,10 +34,9 @@ logger = logging.getLogger(__name__)
 TRANSCRIPTION_PROMPT = """\
 You are one of the world's leading experts on Alexander von Humboldt's handwriting
 (Kurrentschrift) and his scientific journal conventions. You have decades of experience
-transcribing his Amerikanische Reisetagebücher for the Berlin-Brandenburgische
-Akademie der Wissenschaften (edition humboldt digital).
+transcribing and editing his travel journals
 
-You are given a page image from Humboldt's American travel journal (Venezuela, 1799–1804)
+You are given a page image from Humboldt's American travel journal (1799–1804)
 and a list of detected regions. For EACH region, produce an accurate scholarly transcription.
 
 HUMBOLDT'S HANDWRITING CHARACTERISTICS (AMERICAN JOURNALS):
@@ -46,33 +45,23 @@ HUMBOLDT'S HANDWRITING CHARACTERISTICS (AMERICAN JOURNALS):
   "Th." = Theil, "Anm." = Anmerkung, "s." = siehe, "vgl." = vergleiche
 - French in Latin script (often easier): species names, references, scientific terms
 - Latin in Latin script: species binomials (e.g. "Croton cascarilla"), citations
-- Spanish in Latin script: Venezuelan place names, colonial terms (e.g. "Llanos",
+- Spanish: place names, colonial terms (e.g. "Llanos",
   "Cumaná", "Maracaibo", "Misioneros", "Alcalde", "Corregidor")
 - Indigenous place/group names may appear in any script
 - Degree symbols ° ′ ″ used extensively for geographic coordinates and angles
 - Astronomical notation: h (hours), ' (minutes), " (seconds)
 - Alchemical symbols: ☉ (Sonne/Sun), ☿ (Quecksilber/Mercury), ♂ (Eisen/Iron)
 - Superscript small letters for abbreviations
-- Marginal notes often in smaller, more compressed script than main text
-- Pasted slips may be in a different ink or paper
 
 TRANSCRIPTION RULES – FOLLOW EXACTLY:
 
 1. PRESERVE original spelling:
-   - "Küste" as written, "Moqueur" not "Moqueur", etc.
-   - Historical variants: "sey" / "sei", "Theil" / "Teil", "giebt" / "gibt"
-   - Spanish as written: "Cumana" or "Cumaná", whichever appears
 
-2. RESOLVE long s (ſ) → 's'; resolve ligatures where clearly identifiable
-
-3. USE modern umlauts (ä ö ü) unless the original clearly writes ae/oe/ue
-
-4. MARK uncertain readings with [?]:
-   - A single unclear word: "Salz[?]burg"
+2. MARK uncertain readings with [?]:
+   - A single unclear word: "Salzburg und [?]"
    - Completely illegible: "[?]"
    - Partially illegible: "Mon[?]te"
-
-5. INLINE EDITORIAL MARKUP:
+3. INLINE EDITORIAL MARKUP:
    - STRUCK-THROUGH words/phrases (correction strikethrough): ~~text~~
      Example: "Die Höhe beträgt ~~120~~ 135 Toisen"
    - UNDERLINED words: <u>text</u>
@@ -80,36 +69,27 @@ TRANSCRIPTION RULES – FOLLOW EXACTLY:
    - Do NOT use ~~text~~ for usage-mark regions; in those, the text is legible
      despite the diagonal lines, so transcribe it normally.
 
-6. PASTED SLIPS (region_type = "pasted_slip"):
-   Transcribe the content of the slip as it appears. Note in editorial_note
-   whether the slip appears to be in Humboldt's hand or another hand, and
-   whether it overlaps/covers any underlying main text.
-
-7. USAGE MARKS (region_type = "usage_mark"):
-   Transcribe the underlying text NORMALLY (do not use ~~strikethrough~~).
-   The diagonal marks are editorial provenance markers, not text deletions.
+4. USAGE MARKS (region_type = "usage_mark"):
+   Struck-through whole parts of a page/region. Transcribe the underlying text NORMALLY (do not use ~~strikethrough~~).
    In editorial_note, note: "Passage marked with Erledigt-Strich (used in
    later publication)" and describe the extent of the mark.
 
-8. MARGINAL NOTES (region_type = "marginal_note"):
-   Transcribe fully. In editorial_note, state the marginal position (left,
+5. MARGINAL NOTES (region_type = "marginal_note"):
+   Transcribe fully, if marginal note is on main page, do not transcribe, if marginalia is on opposite journal page and cut off. In editorial_note, state the marginal position (left,
    right, top, bottom, opposite) and whether the note appears to be a later
-   addition (different ink, different pen width, etc.).
+   addition (different ink, different pen width, etc.)
    Marginal notes are SEPARATE from the main text — do NOT duplicate any
    content from adjacent main_text regions.
 
-9. PRESERVE line breaks within a region using \\n
+6 PRESERVE line breaks within a region using \\n
 
-10. TABLES/CALCULATIONS: Preserve columnar structure in table_data.cells
+7. TABLES/CALCULATIONS: Preserve columnar structure in table_data.cells
 
-11. IDENTIFY languages: "de" (German), "fr" (French), "la" (Latin), "es" (Spanish)
+8. IDENTIFY languages: "de" (German), "fr" (French), "la" (Latin), "es" (Spanish)
 
-12. AVOID DUPLICATION: A passage must appear in EXACTLY ONE region's transcription.
-    If a marginal note annotates a main_text passage, transcribe the note in the
-    marginal_note region and the annotated passage in the main_text region, but
-    do NOT copy the note text into the main_text or vice versa.
+9. AVOID DUPLICATION
 
-FOR VISUAL REGIONS (sketch):
+10. FOR VISUAL REGIONS (sketch):
 - Describe WHAT is depicted: landscape profile, animal/plant diagram, coastline, etc.
 - Note any labels or text within the sketch
 - Describe technique (pen, pencil, pencil wash)
