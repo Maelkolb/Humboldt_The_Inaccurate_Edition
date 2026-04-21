@@ -6,8 +6,7 @@ been transcribed for a page but BEFORE NER/Geocoding.
 
 Problems detected and fixed:
 1. DUPLICATE LINES – text that appears verbatim (or near-verbatim) in two or
-   more regions, typically because a marginal note was accidentally repeated
-   inside the main_text block (or vice versa).
+   more regions, because the region margins included lines of other regions. 
 2. MAIN-TEXT CONTAMINATION – main_text regions that incorporate marginal or
    pasted-slip text that should have been kept separate.
 3. CONTENT GAPS – a region_detection bbox suggests content that is absent from
