@@ -125,11 +125,16 @@ class Entity:
 
 @dataclass
 class GeoLocation:
-    """Geographic coordinates for a location entity."""
+    """Geographic coordinates and authority identifiers for a location entity."""
     name: str
     lat: float
     lon: float
     display_name: str
+    # Authority identifiers – populated when resolved via Wikidata
+    wikidata_id: Optional[str] = None    # e.g. "Q54810"
+    geonames_id: Optional[int] = None   # numeric GeoNames feature ID (P1566)
+    # Provenance of the resolved data
+    source: str = "nominatim"           # "wikidata" | "nominatim"
 
 
 @dataclass
@@ -183,6 +188,9 @@ class PageResult:
                 lat=loc["lat"],
                 lon=loc["lon"],
                 display_name=loc["display_name"],
+                wikidata_id=loc.get("wikidata_id"),
+                geonames_id=loc.get("geonames_id"),
+                source=loc.get("source", "nominatim"),
             )
             for loc in d.get("locations", [])
         ]
