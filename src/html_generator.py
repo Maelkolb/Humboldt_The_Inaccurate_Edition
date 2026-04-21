@@ -8,12 +8,16 @@ Integrates the updated code-cell version with:
 - Entity highlighting, maps, responsive design
 """
 
+import base64
 import html as html_lib
+import io
 import json
 import logging
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from PIL import Image
 
 from .models import Entity, PageResult, Region
 from .region_detection import load_image_as_base64
@@ -22,6 +26,28 @@ logger = logging.getLogger(__name__)
 
 LANG_NAMES = {"de": "German", "fr": "French", "la": "Latin", "es": "Spanish"}
 LANG_SHORT = {"de": "DE", "fr": "FR", "la": "LA", "es": "ES"}
+
+# Maximum width (px) for embedded facsimile images. Larger originals are
+# downscaled before base64-encoding so the HTML file stays manageable.
+EMBED_IMAGE_MAX_WIDTH = 1000
+EMBED_IMAGE_QUALITY   = 72   # JPEG quality for embedded thumbnails
+
+
+def _resize_image_for_embed(image_path: Path) -> str:
+    """
+    Open *image_path*, downscale to at most EMBED_IMAGE_MAX_WIDTH wide,
+    re-compress as JPEG, and return a base64-encoded string.
+    """
+    with Image.open(image_path) as img:
+        if img.mode not in ("RGB", "L"):
+            img = img.convert("RGB")
+        w, h = img.size
+        if w > EMBED_IMAGE_MAX_WIDTH:
+            ratio = EMBED_IMAGE_MAX_WIDTH / w
+            img = img.resize((EMBED_IMAGE_MAX_WIDTH, int(h * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=EMBED_IMAGE_QUALITY, optimize=True)
+        return base64.b64encode(buf.getvalue()).decode()
 
 
 def _find_entity_spans(text, entities):
@@ -273,7 +299,10 @@ def generate_html_edition(
         elif image_folder:
             ip = Path(image_folder) / result.image_filename
             if ip.exists():
-                b64, _ = load_image_as_base64(ip)
+                # FIX 3: downscale + recompress before embedding so the HTML
+                # file stays small. _resize_image_for_embed caps width at
+                # EMBED_IMAGE_MAX_WIDTH and re-saves at EMBED_IMAGE_QUALITY.
+                b64 = _resize_image_for_embed(ip)
                 facs_img = f'<img src="data:image/jpeg;base64,{b64}" alt="Fol. {result.folio_label}">'
 
         overlay = _build_overlay(result.regions, rc, rl)
@@ -346,7 +375,9 @@ body{font-family:'Source Serif 4','Noto Serif',Georgia,serif;background:var(--bg
 .entry-nums{font-size:.78rem;color:var(--accent2);font-style:italic}
 .page-info{font-size:.7rem;color:var(--fg-faint)}
 .page-langs{font-size:.68rem;color:var(--fg-faint)}
-.page-columns{display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;align-items:start}
+/* FIX 2: give the transcription column significantly more space than the
+   facsimile (3fr vs 2fr). The old rule was 1fr 1fr (equal split). */
+.page-columns{display:grid;grid-template-columns:2fr 3fr;gap:1.25rem;align-items:start}
 .page-columns.transcription-only{grid-template-columns:1fr;max-width:780px}
 .facsimile-panel{position:sticky;top:52px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);background:#2a2a2a;max-height:calc(100vh - 70px);overflow-y:auto}
 .facs-toolbar{display:flex;gap:.4rem;padding:.3rem .5rem;background:#333;border-bottom:1px solid #444}
@@ -381,7 +412,9 @@ body{font-family:'Source Serif 4','Noto Serif',Georgia,serif;background:var(--bg
 .body-text{text-align:justify;hyphens:auto;-webkit-hyphens:auto}
 /* ── Marginal layout ── */
 .page-body{display:block}
-.page-body--three-col{display:grid;grid-template-columns:minmax(0,180px) 1fr minmax(0,180px);gap:.75rem;align-items:start}
+/* FIX 2 (continued): narrow the margin columns from 180px to 120px so the
+   main text body gets the bulk of the transcription panel width. */
+.page-body--three-col{display:grid;grid-template-columns:minmax(0,120px) 1fr minmax(0,120px);gap:.75rem;align-items:start}
 .margin-col{font-size:.82rem;line-height:1.55}
 .margin-col--left{border-right:1px dashed var(--border-l);padding-right:.5rem}
 .margin-col--right{border-left:1px dashed var(--border-l);padding-left:.5rem}
@@ -441,11 +474,14 @@ body{font-family:'Source Serif 4','Noto Serif',Georgia,serif;background:var(--bg
 /* Inline editorial markup */
 .inline-struck{text-decoration:line-through;text-decoration-color:var(--red);color:var(--fg-dim);opacity:.65;cursor:help}
 .inline-underline{border-bottom:2px solid var(--accent);padding-bottom:1px;cursor:help}
-@media(max-width:1100px){.page-body--three-col{grid-template-columns:minmax(0,140px) 1fr minmax(0,140px)}}
+@media(max-width:1100px){.page-body--three-col{grid-template-columns:minmax(0,90px) 1fr minmax(0,90px)}}
 @media(max-width:900px){.page-columns{grid-template-columns:1fr}.facsimile-panel{position:relative;top:0;max-height:50vh}body{font-size:14.5px}.book-page{padding:.8rem}.page-body--three-col{grid-template-columns:1fr}.margin-col{border:none;border-top:1px dashed var(--border-l);padding:.3rem 0;margin-top:.3rem}}
 @media print{.top-bar,.legend-panel,.facs-toolbar{display:none}.book-page{display:block!important;page-break-after:always}.page-columns{grid-template-columns:1fr}.facsimile-panel{display:none}}
 """
 
+    # FIX 1: switch map tiles from openstreetmap.org (blocks requests with a
+    # Referer header → 403) to CARTO Voyager, which is free, requires no API
+    # key, and does not block embedded HTML consumers.
     JS = """
 (function(){
   var pages=document.querySelectorAll('.book-page'),sel=document.getElementById('page-select'),ctr=document.getElementById('page-counter');
@@ -485,7 +521,10 @@ body{font-family:'Source Serif 4','Noto Serif',Georgia,serif;background:var(--bg
     if(tr){tr.classList.add('region-active');tr.scrollIntoView({behavior:'smooth',block:'center'});}
   });});
 
-  document.querySelectorAll('[data-toggle]').forEach(function(b){b.addEventListener('click',function(){var t=document.getElementById(b.dataset.toggle);if(!t)return;var s=t.style.display==='none'||!t.style.display;t.style.display=s?'block':'none';if(s&&t.classList.contains('map-wrap')&&!t.dataset.init){t.dataset.init='1';var d=JSON.parse(t.dataset.locations);var m=L.map(t).setView(d.center,6);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'OpenStreetMap'}).addTo(m);d.locations.forEach(function(l){L.marker([l.lat,l.lon]).addTo(m).bindPopup('<b>'+l.name+'</b><br>'+l.display);});setTimeout(function(){m.invalidateSize();},120);}});});
+  document.querySelectorAll('[data-toggle]').forEach(function(b){b.addEventListener('click',function(){var t=document.getElementById(b.dataset.toggle);if(!t)return;var s=t.style.display==='none'||!t.style.display;t.style.display=s?'block':'none';if(s&&t.classList.contains('map-wrap')&&!t.dataset.init){t.dataset.init='1';var d=JSON.parse(t.dataset.locations);var m=L.map(t).setView(d.center,6);
+    /* FIX 1: CARTO Voyager tiles — no Referer block, free, no API key needed */
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',subdomains:'abcd',maxZoom:19}).addTo(m);
+    d.locations.forEach(function(l){L.marker([l.lat,l.lon]).addTo(m).bindPopup('<b>'+l.name+'</b><br>'+l.display);});setTimeout(function(){m.invalidateSize();},120);}});});
 
   show(0);
 })();
