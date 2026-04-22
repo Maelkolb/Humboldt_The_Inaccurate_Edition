@@ -75,15 +75,35 @@ TRANSCRIPTION RULES – FOLLOW EXACTLY:
    later publication)" and describe the extent of the mark.
 
 5. MARGINAL NOTES (region_type = "marginal_note"):
-   Transcribe fully, if marginal note is on main page, do not transcribe, if marginalia is on opposite journal page and cut off. In editorial_note, state the marginal position (left,
-   right, top, bottom, opposite) and whether the note appears to be a later
-   addition (different ink, different pen width, etc.)
+   TWO DISTINCT CASES — treat them very differently:
+
+   A) MARGIN NOTES ON THIS PAGE (marginal_position = "left", "right", "mTop", "mBottom"):
+      Text Humboldt physically wrote in the margin of this page. Transcribe fully.
+      In editorial_note, state the marginal position and whether it is a later
+      addition (different ink, different pen width, etc.)
+
+   B) OPPOSITE-FOLIO BLEEDTHROUGH (marginal_position = "opposite"):
+      Text from the OTHER side of the leaf or the facing folio that is faintly
+      visible through the paper. It is NOT meant to be read from this side and
+      is often mirrored, very faint, or fragmentary. Do NOT transcribe it.
+      Set content: "" (empty string).
+      In editorial_note, write: "Bleedthrough from opposite folio — not transcribed."
+
    Marginal notes are SEPARATE from the main text — do NOT duplicate any
    content from adjacent main_text regions.
 
 6 PRESERVE line breaks within a region using \\n
 
-7. TABLES/CALCULATIONS: Preserve columnar structure in table_data.cells
+7. TABLES (observation_table, instrument_list):
+   ALWAYS provide BOTH fields — even when the table is difficult to read:
+   - content: verbatim transcription of every visible character, line breaks as \\n.
+     This is shown as fallback if cells cannot be rendered as a table.
+   - table_data: {"cells": [["Col1","Col2",...], ["val","val",...], ...], "caption": "..."}
+     Row 0 must be column headers. If column boundaries are unclear, use one column.
+     Example for a typical Humboldt observation table:
+     {"cells": [["Uhr", "Min.", "Sec.", "Grad"], ["6", "42", "15", "78° 20'"], ["6", "44", "03", "78° 21'"]], "caption": "Winkel-Messung"}
+   Never return table_data with an empty cells array. If cells are truly unreadable,
+   omit table_data entirely (null) and put everything in content.
 
 8. IDENTIFY languages: "de" (German), "fr" (French), "la" (Latin), "es" (Spanish)
 
@@ -162,6 +182,38 @@ Respond ONLY with a JSON array matching each region (same order, same indices):
         "writing_layer": "primary",
         "is_pasted_slip": false,
         "is_usage_marked": true
+    }},
+    {{
+        "region_index": 4,
+        "region_type": "observation_table",
+        "is_visual": false,
+        "content": "Uhr  Min.  Sec.  Grad\\n6    42    15    78° 20'\\n6    44    03    78° 21'",
+        "table_data": {{"cells": [["Uhr", "Min.", "Sec.", "Grad"], ["6", "42", "15", "78° 20'"], ["6", "44", "03", "78° 21'"]], "caption": "Winkel-Messung"}},
+        "languages": ["de"],
+        "editorial_note": "Angular measurement table, three observations",
+        "uncertain_readings": [],
+        "crossed_out_text": null,
+        "position": "lower center",
+        "marginal_position": null,
+        "writing_layer": "primary",
+        "is_pasted_slip": false,
+        "is_usage_marked": false
+    }},
+    {{
+        "region_index": 5,
+        "region_type": "marginal_note",
+        "is_visual": false,
+        "content": "",
+        "table_data": null,
+        "languages": [],
+        "editorial_note": "Bleedthrough from opposite folio — not transcribed.",
+        "uncertain_readings": [],
+        "crossed_out_text": null,
+        "position": "right edge",
+        "marginal_position": "opposite",
+        "writing_layer": null,
+        "is_pasted_slip": false,
+        "is_usage_marked": false
     }}
 ]
 
