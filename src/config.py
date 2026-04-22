@@ -4,7 +4,7 @@ Configuration for the Humboldt Journal Digital Edition pipeline.
 Tailored for Alexander von Humboldt's handwritten scientific journal:
 - Complex page layouts with marginalia, calculations, sketches
 - Multilingual content (German, French, Latin)
-- Crossed-out passages, interlinear additions, difficult handwriting
+- Crossed-out passages, difficult handwriting
 """
 
 import os
@@ -42,9 +42,6 @@ REGION_TYPES: list[str] = [
     "observation_table",    # structured observational data (angles, times, measurements)
     "sketch",               # pen drawings, landscape profiles, plant/animal diagrams
     "crossed_out",          # large struck-through sections (multiple lines, whole pages)
-    "usage_mark",           # Erledigt-Strich: diagonal line marking a passage as used
-                            # in a later publication (not a regular deletion)
-    "interlinear",          # text added between existing lines
     "bibliographic_ref",    # citation of a publication, atlas, or other work
     "coordinates",          # geographic coordinate notations
     "instrument_list",      # lists of scientific instruments (often with prices)
@@ -149,8 +146,6 @@ REGION_COLORS: dict[str, str] = {
     "observation_table": "#006064",
     "sketch":            "#4e342e",
     "crossed_out":       "#b71c1c",
-    "usage_mark":        "#c62828",
-    "interlinear":       "#e65100",
     "bibliographic_ref": "#3e2723",
     "coordinates":       "#0d47a1",
     "instrument_list":   "#bf360c",
@@ -167,8 +162,6 @@ REGION_LABELS: dict[str, str] = {
     "observation_table": "Observation Table",
     "sketch":            "Sketch",
     "crossed_out":       "Crossed Out",
-    "usage_mark":        "Usage Mark",
-    "interlinear":       "Interlinear",
     "bibliographic_ref": "Bibliographic Ref.",
     "coordinates":       "Coordinates",
     "instrument_list":   "Instrument List",
