@@ -338,7 +338,7 @@ def generate_html_edition(
             facs_panel = (
                 '<div class="facsimile-panel">'
                 '<div class="facs-toolbar"><button class="facs-btn facs-btn-overlay">Regions</button></div>'
-                f'<div class="facs-image-wrap">{facs_img}{overlay}</div></div>')
+                f'<div class="facs-image-wrap"><div class="facs-zoom-layer">{facs_img}{overlay}</div></div></div>')
 
         map_html = ""
         if result.locations:
@@ -406,14 +406,16 @@ body{font-family:'Source Serif 4','Noto Serif',Georgia,serif;background:var(--bg
    facsimile (3fr vs 2fr). The old rule was 1fr 1fr (equal split). */
 .page-columns{display:grid;grid-template-columns:2fr 3fr;gap:1.25rem;align-items:start}
 .page-columns.transcription-only{grid-template-columns:1fr;max-width:780px}
-.facsimile-panel{position:sticky;top:52px;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);background:#2a2a2a;max-height:calc(100vh - 70px);overflow-y:auto}
+.facsimile-panel{position:sticky;top:52px;border:1px solid var(--border);border-radius:var(--radius);overflow:auto;box-shadow:var(--shadow);background:#2a2a2a;max-height:calc(100vh - 70px)}
 .facs-toolbar{display:flex;gap:.4rem;padding:.3rem .5rem;background:#333;border-bottom:1px solid #444}
 .facs-btn{padding:.18rem .5rem;font-size:.62rem;font-weight:600;background:rgba(255,255,255,.07);color:rgba(255,255,255,.65);border:1px solid rgba(255,255,255,.13);border-radius:3px;cursor:pointer;text-transform:uppercase;letter-spacing:.04em}
 .facs-btn:hover{background:rgba(255,255,255,.14);color:#fff}
 .facs-btn.active{background:rgba(255,255,255,.2);color:#fff;border-color:rgba(255,255,255,.3)}
-.facs-image-wrap{position:relative;line-height:0}
+.facs-image-wrap{position:relative;overflow:auto}
+.facs-zoom-layer{position:relative;line-height:0;width:100%;transition:width .2s}
+.facs-zoom-layer.zoomed{width:200%}
 .facs-image-wrap img{display:block;width:100%;height:auto;cursor:zoom-in}
-.facs-image-wrap img.zoomed{width:200%;cursor:zoom-out}
+.facs-image-wrap img.zoomed{cursor:zoom-out}
 .region-overlay{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;transition:opacity .25s}
 .region-overlay.hidden{opacity:0;pointer-events:none}
 .ov-box{position:absolute;border:2px solid var(--ov-color,#546e7a);background:rgba(0,0,0,.05);border-radius:2px;pointer-events:all;cursor:pointer;transition:background .15s,box-shadow .15s}
@@ -530,7 +532,7 @@ body{font-family:'Source Serif 4','Noto Serif',Georgia,serif;background:var(--bg
 
   document.querySelectorAll('.view-toggle button').forEach(function(b){b.addEventListener('click',function(){var m=b.dataset.mode;document.querySelectorAll('.view-toggle button').forEach(function(x){x.classList.remove('active');});b.classList.add('active');document.querySelectorAll('.page-columns').forEach(function(c){var f=c.querySelector('.facsimile-panel');if(m==='dual'){c.classList.remove('transcription-only');if(f)f.style.display='';}else{c.classList.add('transcription-only');if(f)f.style.display='none';}});});});
 
-  document.querySelectorAll('.facs-image-wrap img').forEach(function(img){img.addEventListener('click',function(){img.classList.toggle('zoomed');});});
+  document.querySelectorAll('.facs-image-wrap img').forEach(function(img){img.addEventListener('click',function(){img.classList.toggle('zoomed');img.closest('.facs-zoom-layer').classList.toggle('zoomed');});});
 
   document.querySelectorAll('.facs-btn-overlay').forEach(function(b){b.addEventListener('click',function(){b.classList.toggle('active');var o=b.closest('.book-page').querySelector('.region-overlay');if(o)o.classList.toggle('hidden');});});
 
