@@ -94,9 +94,7 @@ All settings in `src/config.py`:
 | Variable | Default | Purpose |
 |---|---|---|
 | `MODEL_ID` | `gemini-3-flash-preview` | Gemini model |
-| `THINKING_LEVEL` | `"medium"` | Higher = better for difficult handwriting |
 | `ENTITY_TYPES` | 8 types | Humboldt-specific entity definitions |
-| `HISTORICAL_NAME_MAP` | 17 entries | Historical → modern place names (in geocoding.py) |
 
 ## Output Files
 
@@ -113,12 +111,11 @@ output/
 ## Editorial Conventions
 
 The transcription follows diplomatic conventions:
-- Original spelling preserved (Oestreich, Weißenfels, sey, Theil)
-- Long s (ſ) resolved to modern 's'
+- Original spelling preserved 
 - Uncertain readings marked `[?]`
 - Crossed-out text rendered with strikethrough
 - Interlinear additions clearly marked
-- Languages tracked per region (DE/FR/LA badges)
+- Languages tracked per region (DE/FR/LA/ESP badges)
 - Editorial notes for ink changes, illegible passages, later additions
 
 ## License
