@@ -66,15 +66,8 @@ TRANSCRIPTION RULES – FOLLOW EXACTLY:
      Example: "Die Höhe beträgt ~~120~~ 135 Toisen"
    - UNDERLINED words: <u>text</u>
      Example: "besonders <u>wichtig</u> für die Beobachtung"
-   - Do NOT use ~~text~~ for usage-mark regions; in those, the text is legible
-     despite the diagonal lines, so transcribe it normally.
 
-4. USAGE MARKS (region_type = "usage_mark"):
-   Struck-through whole parts of a page/region. Transcribe the underlying text NORMALLY (do not use ~~strikethrough~~).
-   In editorial_note, note: "Passage marked with Erledigt-Strich (used in
-   later publication)" and describe the extent of the mark.
-
-5. MARGINAL NOTES (region_type = "marginal_note"):
+4. MARGINAL NOTES (region_type = "marginal_note"):
    TWO DISTINCT CASES — treat them very differently:
 
    A) MARGIN NOTES ON THIS PAGE (marginal_position = "left", "right", "mTop", "mBottom"):
@@ -92,9 +85,9 @@ TRANSCRIPTION RULES – FOLLOW EXACTLY:
    Marginal notes are SEPARATE from the main text — do NOT duplicate any
    content from adjacent main_text regions.
 
-6 PRESERVE line breaks within a region using \\n
+5. PRESERVE line breaks within a region using \\n
 
-7. TABLES (observation_table, instrument_list):
+6. TABLES (observation_table, instrument_list):
    ALWAYS provide BOTH fields — even when the table is difficult to read:
    - content: verbatim transcription of every visible character, line breaks as \\n.
      This is shown as fallback if cells cannot be rendered as a table.
@@ -105,11 +98,11 @@ TRANSCRIPTION RULES – FOLLOW EXACTLY:
    Never return table_data with an empty cells array. If cells are truly unreadable,
    omit table_data entirely (null) and put everything in content.
 
-8. IDENTIFY languages: "de" (German), "fr" (French), "la" (Latin), "es" (Spanish)
+7. IDENTIFY languages: "de" (German), "fr" (French), "la" (Latin), "es" (Spanish)
 
-9. AVOID DUPLICATION
+8. AVOID DUPLICATION
 
-10. FOR VISUAL REGIONS (sketch):
+9. FOR VISUAL REGIONS (sketch):
 - Describe WHAT is depicted: landscape profile, animal/plant diagram, coastline, etc.
 - Note any labels or text within the sketch
 - Describe technique (pen, pencil, pencil wash)
@@ -132,8 +125,7 @@ Respond ONLY with a JSON array matching each region (same order, same indices):
         "position": "top center",
         "marginal_position": null,
         "writing_layer": "primary",
-        "is_pasted_slip": false,
-        "is_usage_marked": false
+        "is_pasted_slip": false
     }},
     {{
         "region_index": 1,
@@ -148,8 +140,7 @@ Respond ONLY with a JSON array matching each region (same order, same indices):
         "position": "left margin",
         "marginal_position": "left",
         "writing_layer": "later_addition",
-        "is_pasted_slip": false,
-        "is_usage_marked": false
+        "is_pasted_slip": false
     }},
     {{
         "region_index": 2,
@@ -164,27 +155,10 @@ Respond ONLY with a JSON array matching each region (same order, same indices):
         "position": "center, pasted",
         "marginal_position": null,
         "writing_layer": "later_addition",
-        "is_pasted_slip": true,
-        "is_usage_marked": false
+        "is_pasted_slip": true
     }},
     {{
         "region_index": 3,
-        "region_type": "usage_mark",
-        "is_visual": false,
-        "content": "Die Chaymas zeigen bei dem Tode...",
-        "table_data": null,
-        "languages": ["de"],
-        "editorial_note": "Passage covered by long diagonal Erledigt-Strich from top-left to bottom-right; text remains legible",
-        "uncertain_readings": [],
-        "crossed_out_text": null,
-        "position": "main body",
-        "marginal_position": null,
-        "writing_layer": "primary",
-        "is_pasted_slip": false,
-        "is_usage_marked": true
-    }},
-    {{
-        "region_index": 4,
         "region_type": "observation_table",
         "is_visual": false,
         "content": "Uhr  Min.  Sec.  Grad\\n6    42    15    78° 20'\\n6    44    03    78° 21'",
@@ -196,11 +170,10 @@ Respond ONLY with a JSON array matching each region (same order, same indices):
         "position": "lower center",
         "marginal_position": null,
         "writing_layer": "primary",
-        "is_pasted_slip": false,
-        "is_usage_marked": false
+        "is_pasted_slip": false
     }},
     {{
-        "region_index": 5,
+        "region_index": 4,
         "region_type": "marginal_note",
         "is_visual": false,
         "content": "",
@@ -212,8 +185,7 @@ Respond ONLY with a JSON array matching each region (same order, same indices):
         "position": "right edge",
         "marginal_position": "opposite",
         "writing_layer": null,
-        "is_pasted_slip": false,
-        "is_usage_marked": false
+        "is_pasted_slip": false
     }}
 ]
 
@@ -311,8 +283,6 @@ def transcribe_regions(
         marginal_position = transcribed.get("marginal_position") or det.get("marginal_position")
         writing_layer = transcribed.get("writing_layer")
         is_pasted_slip = bool(transcribed.get("is_pasted_slip", False))
-        is_usage_marked = bool(transcribed.get("is_usage_marked",
-                                               region_type == "usage_mark"))
 
         regions.append(Region(
             region_type=region_type,
@@ -330,7 +300,6 @@ def transcribe_regions(
             marginal_position=marginal_position,
             writing_layer=writing_layer,
             is_pasted_slip=is_pasted_slip,
-            is_usage_marked=is_usage_marked,
         ))
 
     regions.sort(key=lambda r: r.region_index)
