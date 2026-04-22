@@ -69,7 +69,6 @@ CHARACTERISTICS OF HUMBOLDT'S AMERICAN JOURNAL PAGES:
   inline or at margins.
 - Individual words or short phrases are struck through (corrected); whole
   paragraphs may also be struck through (deleted).
-- Text is added between lines (interlinear additions).
 - Reading order is NOT always top-to-bottom: marginalia relate to specific
   passages, insertions are possible.
 
@@ -92,13 +91,8 @@ REGION TYPES TO DETECT:
 - observation_table: Structured observational data (times, angles, measurements)
 - sketch: Hand-drawn illustration, landscape profile, or diagram
 - crossed_out: Large struck-through sections (multiple continuous lines or a
-  whole block struck through as a unit — a deletion, not a usage mark).
+  whole block struck through as a unit — a deletion).
   Do NOT use for individual struck-through words; those are handled inline.
-- usage_mark: A region covered by diagonal Erledigt-Striche (typically 1–3 long
-  diagonal lines across a passage, indicating it was extracted for publication).
-  These look different from regular strikethrough: they are large diagonal lines
-  across a block of otherwise legible text. Note the span of the marked region.
-- interlinear: Text added between existing lines
 - bibliographic_ref: Citation of a publication, atlas, or other work
 - coordinates: Geographic coordinate notations (latitude, longitude)
 - instrument_list: Lists of scientific instruments (often with prices)
@@ -116,38 +110,32 @@ CRITICAL RULES:
    the edge), mark it as marginal_note with marginal_position "opposite" and
    has_text: false. It will NOT be transcribed.
 
-2. DISTINGUISH USAGE MARKS FROM DELETIONS: An "Erledigt-Strich" is a long
-   diagonal line or lines drawn across a legible passage to mark it as used —
-   the underlying text is still readable. A deletion ("crossed_out") is a dense
-   horizontal strikethrough that makes the text hard to read. If you see both
-   the text and diagonal marks, it's a usage_mark.
-
-3. PASTED SLIPS: If you see a piece of paper that appears to be glued onto the
+2. PASTED SLIPS: If you see a piece of paper that appears to be glued onto the
    page (different paper texture, slightly raised edge, sometimes at an angle),
    classify it as "pasted_slip".
 
-4. MERGE SMALL FRAGMENTS: Do NOT detect individual enumeration numbers ("50)",
+3. MERGE SMALL FRAGMENTS: Do NOT detect individual enumeration numbers ("50)",
    "51)"), single words, or short labels as standalone regions. Include them in
    the larger region they belong to. Each region should be a meaningful block.
 
-5. BOUNDING BOXES: Make bboxes generous — slightly too large is better than
+4. BOUNDING BOXES: Make bboxes generous — slightly too large is better than
    cutting off text. Add ~10 units of margin. The bbox for a marginal note
    should tightly contain the marginal text.
 
-6. COHERENT BLOCKS: A continuous main_text passage should be ONE region, not
+5. COHERENT BLOCKS: A continuous main_text passage should be ONE region, not
    fragmented. Only split at genuine type changes.
 
-7. READING ORDER: Return regions in the best reconstructable reading order.
+6. READING ORDER: Return regions in the best reconstructable reading order.
    Start with page_number, then mTop marginal notes, then entry_heading, then
    follow the logical text flow. Left/right marginal notes can come after the
    main_text region they annotate.
 
-8. For each region provide a brief summary (~20 words) for identification.
+7. For each region provide a brief summary (~20 words) for identification.
 
-9. Identify the language: "de" (German), "fr" (French), "la" (Latin), "es" (Spanish).
+8. Identify the language: "de" (German), "fr" (French), "la" (Latin), "es" (Spanish).
 
-10. EACH region must have a bounding box: [y_min, x_min, y_max, x_max], values
-    0–1000 relative to the full image (0=top/left, 1000=bottom/right).
+9. EACH region must have a bounding box: [y_min, x_min, y_max, x_max], values
+   0–1000 relative to the full image (0=top/left, 1000=bottom/right).
 
 Respond ONLY with a JSON array:
 [
@@ -193,16 +181,6 @@ Respond ONLY with a JSON array:
     },
     {
         "region_index": 4,
-        "region_type": "usage_mark",
-        "has_text": true,
-        "summary": "Paragraph about Chaymas people marked with Erledigt-Strich",
-        "position": "main body",
-        "marginal_position": null,
-        "related_entry": "51",
-        "bbox": [290, 90, 480, 910]
-    },
-    {
-        "region_index": 5,
         "region_type": "sketch",
         "has_text": false,
         "summary": "Pen sketch of coastal mountain profile",
