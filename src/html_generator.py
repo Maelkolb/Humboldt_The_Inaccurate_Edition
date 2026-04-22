@@ -158,8 +158,15 @@ def _render_region(region, entities, ec, rc, rl, page_idx):
     if rtype == "entry_heading":
         a = _annotate_text(region.content, entities, ec)
         return f'{wo}{hd}<h2 class="entry-heading">{a}</h2>{note}{wc}'
-    if rtype == "observation_table" and region.table_data:
-        return f'{wo}{hd}{_render_table_html(region.table_data)}{note}{wc}'
+    if rtype == "observation_table":
+        cells = (region.table_data or {}).get("cells") if region.table_data else None
+        if cells:
+            return f'{wo}{hd}{_render_table_html(region.table_data)}{note}{wc}'
+        # Fallback: model returned no structured cells – render verbatim content
+        raw = html_lib.escape(region.content or "")
+        body = (f'<pre class="calc-body">{raw}</pre>' if raw
+                else '<p class="body-text fg-faint"><em>[Table not parsed – no structured data returned]</em></p>')
+        return f'{wo}{hd}{body}{note}{wc}'
     if rtype == "calculation":
         return f'{wo}{hd}<pre class="calc-body">{html_lib.escape(region.content)}</pre>{note}{wc}'
     if rtype == "crossed_out":
@@ -172,9 +179,24 @@ def _render_region(region, entities, ec, rc, rl, page_idx):
         return f'{wo}{hd}<p class="body-text usage-marked-text">{a}</p>{note}{wc}'
     if rtype == "coordinates":
         return f'{wo}{hd}<p class="coords-body">{html_lib.escape(region.content)}</p>{note}{wc}'
-    if rtype == "instrument_list" and region.table_data:
-        return f'{wo}{hd}{_render_table_html(region.table_data)}{note}{wc}'
-    if rtype in ("page_number", "catch_phrase"):
+    if rtype == "instrument_list":
+        cells = (region.table_data or {}).get("cells") if region.table_data else None
+        if cells:
+            return f'{wo}{hd}{_render_table_html(region.table_data)}{note}{wc}'
+        raw = html_lib.escape(region.content or "")
+        body = (f'<pre class="calc-body">{raw}</pre>' if raw
+                else '<p class="body-text fg-faint"><em>[List not parsed – no structured data returned]</em></p>')
+        return f'{wo}{hd}{body}{note}{wc}'
+    if rtype == "marginal_note":
+        mp = getattr(region, "marginal_position", None)
+        if mp == "opposite":
+            # Text bleeds through from the reverse/opposite folio – not readable, not transcribed
+            return (f'{wo}{hd}'
+                    f'<p class="body-text opposite-bleed">'
+                    f'<em>[Bleedthrough from opposite folio — not transcribed]</em></p>'
+                    f'{note}{wc}')
+        a = _annotate_text(region.content, entities, ec)
+        return f'{wo}{hd}<p class="body-text">{a}</p>{note}{wc}'
         return f'{wo}{tag}<span class="meta-body">{html_lib.escape(region.content)}</span>{wc}'
     a = _annotate_text(region.content, entities, ec)
     return f'{wo}{hd}<p class="body-text">{a}</p>{note}{wc}'
@@ -197,12 +219,13 @@ def _build_transcription_panel(regions, entities, ec, rc, rl, page_idx):
     left_notes  = [r for r in regions if r.region_type == "marginal_note" and _mp(r) == "left"]
     right_notes = [r for r in regions if r.region_type == "marginal_note" and _mp(r) == "right"]
     top_notes   = [r for r in regions if r.region_type == "marginal_note" and _mp(r) == "mTop"]
-    bot_notes   = [r for r in regions if r.region_type == "marginal_note"
-                   and _mp(r) in ("mBottom", "opposite")]
+    bot_notes   = [r for r in regions if r.region_type == "marginal_note" and _mp(r) == "mBottom"]
+    opp_notes   = [r for r in regions if r.region_type == "marginal_note" and _mp(r) == "opposite"]
     # Everything else goes in the main column
     main_regions = [r for r in regions
                     if r not in left_notes and r not in right_notes
-                    and r not in top_notes and r not in bot_notes]
+                    and r not in top_notes and r not in bot_notes
+                    and r not in opp_notes]
 
     def _html(rs):
         return "".join(_render_region(r, entities, ec, rc, rl, page_idx) for r in rs)
@@ -214,6 +237,10 @@ def _build_transcription_panel(regions, entities, ec, rc, rl, page_idx):
     # Bottom/opposite notes strip
     bot_html = (f'<div class="margin-strip margin-strip--bottom">{_html(bot_notes)}</div>'
                 if bot_notes else "")
+
+    # Opposite-folio bleedthrough strip (collapsed / visually de-emphasised)
+    opp_html = (f'<div class="margin-strip margin-strip--opposite">{_html(opp_notes)}</div>'
+                if opp_notes else "")
 
     # 3-column body or single-column if no left/right margins
     if left_notes or right_notes:
@@ -227,7 +254,7 @@ def _build_transcription_panel(regions, entities, ec, rc, rl, page_idx):
     else:
         body_html = f'<div class="page-body">{_html(main_regions)}</div>'
 
-    return top_html + body_html + bot_html
+    return top_html + body_html + bot_html + opp_html
 
 
 def _build_overlay(regions, rc, rl):
@@ -421,6 +448,9 @@ body{font-family:'Source Serif 4','Noto Serif',Georgia,serif;background:var(--bg
 .main-col{min-width:0}
 .margin-strip{padding:.4rem .6rem;background:var(--bg-warm);border:1px dashed var(--border);border-radius:var(--radius);margin-bottom:.5rem;font-size:.82rem}
 .margin-strip--top{border-top-color:#b39ddb}.margin-strip--bottom{border-bottom-color:#b39ddb}
+/* Opposite-folio bleedthrough: visually suppressed, italic, greyed out */
+.margin-strip--opposite{opacity:.5;border-style:dotted;border-color:#bbb;background:var(--bg)}
+.opposite-bleed{color:var(--fg-faint);font-style:italic;font-size:.8rem}
 /* ── Region types ── */
 .region--entry_heading{margin-top:1.2rem;padding-top:.6rem;border-top:1px solid var(--border);border-left-color:var(--accent)!important}
 .entry-heading{font-family:'EB Garamond',serif;font-size:1.2rem;font-weight:600;line-height:1.3;color:var(--accent)}
