@@ -98,10 +98,10 @@ TRANSCRIPTION RULES – FOLLOW EXACTLY:
    ALWAYS provide BOTH fields — even when the table is difficult to read:
    - content: verbatim transcription of every visible character, line breaks as \\n.
      This is shown as fallback if cells cannot be rendered as a table.
-   - table_data: {"cells": [["Col1","Col2",...], ["val","val",...], ...], "caption": "..."}
+   - table_data: {{"cells": [["Col1","Col2",...], ["val","val",...], ...], "caption": "..."}}
      Row 0 must be column headers. If column boundaries are unclear, use one column.
      Example for a typical Humboldt observation table:
-     {"cells": [["Uhr", "Min.", "Sec.", "Grad"], ["6", "42", "15", "78° 20'"], ["6", "44", "03", "78° 21'"]], "caption": "Winkel-Messung"}
+     {{"cells": [["Uhr", "Min.", "Sec.", "Grad"], ["6", "42", "15", "78° 20'"], ["6", "44", "03", "78° 21'"]], "caption": "Winkel-Messung"}}
    Never return table_data with an empty cells array. If cells are truly unreadable,
    omit table_data entirely (null) and put everything in content.
 
