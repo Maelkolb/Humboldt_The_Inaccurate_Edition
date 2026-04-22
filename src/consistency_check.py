@@ -135,7 +135,6 @@ def check_and_fix_regions(
             "position": r.position,
             "marginal_position": r.marginal_position,
             "is_pasted_slip": r.is_pasted_slip,
-            "is_usage_marked": r.is_usage_marked,
             "editorial_note": r.editorial_note,
         }
         for r in regions
