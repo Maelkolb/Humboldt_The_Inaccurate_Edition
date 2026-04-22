@@ -77,10 +77,14 @@ REGION TYPES TO DETECT:
 - entry_heading: Numbered entry header (e.g. "N. 50-52.", "51)", "9)")
 - main_text: Primary journal prose within an entry (the body text column)
 - marginal_note: Any text Humboldt wrote in the margins of THIS page —
-  left margin, right margin, top margin, bottom margin, or text written on the
-  opposite side of the leaf visible from this side. These are genuine content
+  left margin, right margin, top margin, bottom margin. These are genuine content
   regions. For EACH marginal_note, record its position: "left", "right", "mTop",
-  "mBottom", or "opposite".
+  or "mBottom".
+  **OPPOSITE-FOLIO BLEEDTHROUGH**: If text is faintly visible at the page edge
+  because it bleeds through from the reverse side of the leaf or the facing folio
+  (often appears faint, mirrored, or partially cut off), classify it as
+  marginal_note with marginal_position "opposite" and has_text: false. This is
+  ghost text — NOT readable content, NOT to be transcribed.
 - pasted_slip: A separate piece of paper physically pasted onto the page.
   Visually distinct: often slightly raised, sometimes at an angle, with its own
   ink. Contains its own separate text.
@@ -103,10 +107,14 @@ REGION TYPES TO DETECT:
 
 CRITICAL RULES:
 
-1. MARGINAL NOTES ARE IMPORTANT CONTENT: Every note Humboldt wrote in the
-   margins of this page must be detected as a "marginal_note" region with its
-   marginal_position ("left", "right", "mTop", "mBottom", "opposite"). Do NOT
-   merge marginal notes into the main_text or ignore them.
+1. MARGINAL NOTES ARE IMPORTANT CONTENT: Every note Humboldt physically wrote in
+   the margins of this page must be detected as a "marginal_note" region with
+   marginal_position "left", "right", "mTop", or "mBottom". Do NOT merge them
+   into main_text or ignore them.
+   OPPOSITE BLEEDTHROUGH IS DIFFERENT: If text from the reverse/facing folio
+   bleeds faintly through the paper (appears ghost-like, mirrored, or cut off at
+   the edge), mark it as marginal_note with marginal_position "opposite" and
+   has_text: false. It will NOT be transcribed.
 
 2. DISTINGUISH USAGE MARKS FROM DELETIONS: An "Erledigt-Strich" is a long
    diagonal line or lines drawn across a legible passage to mark it as used —
@@ -278,9 +286,12 @@ def detect_regions(
                 region["marginal_position"] = "mTop"
             elif "bottom" in pos:
                 region["marginal_position"] = "mBottom"
-            elif "opposite" in pos:
+            elif "opposite" in pos or "bleed" in pos:
                 region["marginal_position"] = "opposite"
         elif mp and mp not in VALID_MARGINAL:
             region["marginal_position"] = None
+        # Opposite bleedthrough must never be marked as having readable text
+        if region.get("marginal_position") == "opposite":
+            region["has_text"] = False
 
     return regions
