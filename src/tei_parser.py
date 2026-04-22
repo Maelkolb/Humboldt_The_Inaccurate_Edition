@@ -23,9 +23,8 @@ Supported TEI elements:
     <note place="">  marginal notes; place = left|right|mTop|mBottom|opposite|inline
     <note rend="sticked">  pasted slip
     <figure>        sketch or diagram
-    <metamark function="used">  Erledigt-Strich usage mark
     <del>           struck-through text  →  ~~text~~
-    <add>           interlinear addition
+    <add>           interlinear addition (flattened into main text)
     <subst>         substitution (del + add)
     <unclear>       uncertain reading    →  text[?]
     <gap>           lacuna              →  [...]
@@ -90,7 +89,7 @@ def _extract_text(elem, skip_notes: bool = True) -> str:
       - <lb/> → \\n
       - <note> → skipped if skip_notes=True
       - <figure> → skipped
-      - <metamark>, <anchor>, <fw>, <pb> → skipped
+      - <metamark>, <anchor>, <fw>, <pb> → skipped (ignored completely)
     """
     parts: List[str] = []
 
@@ -298,7 +297,6 @@ class _PageCollector:
             "notes": [],        # list of lxml elements
             "figures": [],      # list of lxml elements
             "fw": [],           # list of lxml elements
-            "metamarks": [],    # list of lxml elements (usage marks)
         }
         self._pages.append(self._current)
 
@@ -344,8 +342,7 @@ class _PageCollector:
             return
 
         if local == "metamark":
-            if self._current is not None:
-                self._current["metamarks"].append(elem)
+            # Skip metamark entirely (used to collect Erledigt-Striche; feature removed)
             if elem.tail:
                 self._push(elem.tail)
             return
@@ -566,26 +563,6 @@ def _build_page_regions(page_data: Dict[str, Any], page_idx: int) -> List[Region
             is_visual=True,
             languages=[],
             position="inline",
-        ))
-        ridx += 1
-
-    # 5) Usage marks (Erledigt-Striche)
-    for mm_elem in page_data["metamarks"]:
-        func = mm_elem.get("function", "")
-        if "used" not in func.lower():
-            continue
-        span_to = mm_elem.get("spanTo", "")
-        regions.append(Region(
-            region_type="usage_mark",
-            region_index=ridx,
-            content="",  # the covered text is in the adjacent main_text region
-            is_visual=False,
-            is_usage_marked=True,
-            editorial_note=(
-                f"Erledigt-Strich marking passage as used in later publication"
-                + (f" (spanTo: {span_to})" if span_to else "")
-            ),
-            position="main body",
         ))
         ridx += 1
 
