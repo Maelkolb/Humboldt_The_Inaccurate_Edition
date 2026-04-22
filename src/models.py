@@ -4,7 +4,7 @@ Data structures for the Humboldt Journal Digital Edition pipeline.
 Extended with editorial apparatus fields for scholarly edition:
 - language tracking per region
 - editorial notes for crossed-out text, uncertain readings
-- positional info (margin location, interlinear position)
+- positional info (margin location)
 """
 
 from dataclasses import dataclass, asdict, field
@@ -20,7 +20,6 @@ class RegionType(str, Enum):
     OBSERVATION_TABLE = "observation_table"
     SKETCH = "sketch"
     CROSSED_OUT = "crossed_out"
-    INTERLINEAR = "interlinear"
     BIBLIOGRAPHIC_REF = "bibliographic_ref"
     COORDINATES = "coordinates"
     INSTRUMENT_LIST = "instrument_list"
@@ -50,7 +49,6 @@ class Region:
     writing_layer: Optional[str] = None  # "primary", "later_addition", "unknown"
     # Special region flags
     is_pasted_slip: bool = False   # physical paper slip pasted onto the page
-    is_usage_marked: bool = False  # crossed with Erledigt-Strich (used in later publication)
     # TEI source tracking
     tei_id: Optional[str] = None  # xml:id of the source TEI element
 
@@ -82,8 +80,6 @@ class Region:
             d["writing_layer"] = self.writing_layer
         if self.is_pasted_slip:
             d["is_pasted_slip"] = self.is_pasted_slip
-        if self.is_usage_marked:
-            d["is_usage_marked"] = self.is_usage_marked
         if self.tei_id:
             d["tei_id"] = self.tei_id
         return d
@@ -106,7 +102,6 @@ class Region:
             marginal_position=d.get("marginal_position"),
             writing_layer=d.get("writing_layer"),
             is_pasted_slip=d.get("is_pasted_slip", False),
-            is_usage_marked=d.get("is_usage_marked", False),
             tei_id=d.get("tei_id"),
         )
 
