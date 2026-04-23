@@ -1,6 +1,6 @@
 # Humboldt Journal – Digital Edition Pipeline
 
-A specialized LLM-powered workflow for creating a scholarly digital edition of **Alexander von Humboldt's handwritten scientific journals** (Tagebücher). Uses **Google Gemini** multimodal models with prompts deeply tailored to Humboldt's difficult handwriting, complex page layouts, and multilingual content.
+A specialized LLM-powered workflow for creating a scholarly digital edition of **Alexander von Humboldt's handwritten scientific field journals**. Uses **Google Gemini 3** with prompts deeply tailored to Humboldt's difficult handwriting, complex page layouts, and multilingual content.
 
 ## Why a specialized pipeline?
 
