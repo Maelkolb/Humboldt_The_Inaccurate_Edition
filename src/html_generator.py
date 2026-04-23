@@ -153,7 +153,7 @@ def _render_region(region, entities, ec, rc, rl, page_idx):
     hd = f'{tag}{meta}'
 
     if region.is_visual or rtype == "sketch":
-        return f'{wo}{hd}<p class="sketch-desc">{html_lib.escape(region.content)}</p>{note}{wc}'
+        return f'{wo}{hd}<p class="sketch-desc">{html_lib.escape(region.content or "")}</p>{note}{wc}'
     if rtype == "entry_heading":
         a = _annotate_text(region.content, entities, ec)
         return f'{wo}{hd}<h2 class="entry-heading">{a}</h2>{note}{wc}'
@@ -166,13 +166,13 @@ def _render_region(region, entities, ec, rc, rl, page_idx):
                 else '<p class="body-text fg-faint"><em>[Table not parsed – no structured data returned]</em></p>')
         return f'{wo}{hd}{body}{note}{wc}'
     if rtype == "calculation":
-        return f'{wo}{hd}<pre class="calc-body">{html_lib.escape(region.content)}</pre>{note}{wc}'
+        return f'{wo}{hd}<pre class="calc-body">{html_lib.escape(region.content or "")}</pre>{note}{wc}'
     if rtype == "crossed_out":
         a = _annotate_text(region.content, entities, ec)
         repl = (f'<div class="repl-text">Replaced by: {html_lib.escape(region.crossed_out_text)}</div>') if region.crossed_out_text else ""
         return f'{wo}{hd}<p class="crossed-text">{a}</p>{repl}{note}{wc}'
     if rtype == "coordinates":
-        return f'{wo}{hd}<p class="coords-body">{html_lib.escape(region.content)}</p>{note}{wc}'
+        return f'{wo}{hd}<p class="coords-body">{html_lib.escape(region.content or "")}</p>{note}{wc}'
     if rtype == "instrument_list":
         cells = (region.table_data or {}).get("cells") if region.table_data else None
         if cells:
