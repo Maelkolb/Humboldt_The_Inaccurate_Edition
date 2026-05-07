@@ -62,7 +62,23 @@ def main() -> None:
     )
     parser.add_argument(
         "--model", default=config.MODEL_ID,
-        help=f"Gemini model ID (default: {config.MODEL_ID})",
+        help=f"Default Gemini model ID for all stages (default: {config.MODEL_ID})",
+    )
+    parser.add_argument(
+        "--model-layout", default=config.MODEL_ID_LAYOUT,
+        help="Override model for region detection (default: same as --model)",
+    )
+    parser.add_argument(
+        "--model-transcription", default=config.MODEL_ID_TRANSCRIPTION,
+        help="Override model for transcription (default: same as --model)",
+    )
+    parser.add_argument(
+        "--model-consistency", default=config.MODEL_ID_CONSISTENCY,
+        help="Override model for consistency check (default: same as --model)",
+    )
+    parser.add_argument(
+        "--model-ner", default=config.MODEL_ID_NER,
+        help="Override model for NER (default: same as --model)",
     )
     parser.add_argument(
         "--thinking", default=config.THINKING_LEVEL,
@@ -103,7 +119,11 @@ def main() -> None:
         sys.exit(1)
 
     client = genai.Client(api_key=api_key)
-    print(f"Gemini client ready – model: {args.model}")
+    print(f"Gemini client ready – default model: {args.model}")
+    print(f"  Per-stage models: layout={args.model_layout or args.model}, "
+          f"transcription={args.model_transcription or args.model}, "
+          f"consistency={args.model_consistency or args.model}, "
+          f"ner={args.model_ner or args.model}")
     print(f"  Thinking: layout={args.thinking_layout}, transcription={args.thinking_transcription}")
 
     results = process_book(
@@ -117,6 +137,10 @@ def main() -> None:
         thinking_level_transcription=args.thinking_transcription,
         start_page=args.start,
         end_page=args.end,
+        model_id_layout=args.model_layout,
+        model_id_transcription=args.model_transcription,
+        model_id_consistency=args.model_consistency,
+        model_id_ner=args.model_ner,
     )
 
     if results:
