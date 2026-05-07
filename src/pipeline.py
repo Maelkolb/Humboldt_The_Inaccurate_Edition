@@ -175,31 +175,50 @@ def process_page(
     thinking_level_transcription: str | None = None,
     run_consistency_check: bool = True,
     geo_cache: Optional[Dict] = None,
+    *,
+    model_id_layout: str | None = None,
+    model_id_transcription: str | None = None,
+    model_id_consistency: str | None = None,
+    model_id_ner: str | None = None,
 ) -> PageResult:
-    """Run the full pipeline for one Humboldt journal page."""
+    """Run the full pipeline for one Humboldt journal page.
+
+    `model_id` is the default applied to every LLM stage. Optional
+    `model_id_layout` / `model_id_transcription` / `model_id_consistency` /
+    `model_id_ner` override the model for that stage only; if any is None,
+    the stage falls back to `model_id`.
+    """
     image_path = Path(image_path)
     folio_label = extract_folio_label(image_path.name)
     logger.info("Processing folio %s (page %d): %s", folio_label, page_number, image_path.name)
+
+    # Resolve per-stage models (fall back to model_id when not set)
+    layout_model        = model_id_layout        or model_id
+    transcription_model = model_id_transcription or model_id
+    consistency_model   = model_id_consistency   or model_id
+    ner_model           = model_id_ner           or model_id
 
     # Use separate thinking levels if provided, otherwise fall back to default
     layout_thinking = thinking_level_layout or thinking_level
     transcription_thinking = thinking_level_transcription or thinking_level
 
     # Step 1 – Region Detection (high thinking for complex layouts)
-    logger.info("  Step 1: Region detection (thinking: %s)...", layout_thinking)
-    detected = detect_regions(client, image_path, model_id, layout_thinking)
+    logger.info("  Step 1: Region detection (model: %s, thinking: %s)...",
+                layout_model, layout_thinking)
+    detected = detect_regions(client, image_path, layout_model, layout_thinking)
     logger.info("  Detected %d regions", len(detected))
 
     # Step 2 – Transcription (low thinking for speed)
-    logger.info("  Step 2: Transcription (thinking: %s)...", transcription_thinking)
-    regions = transcribe_regions(client, image_path, detected, model_id, transcription_thinking)
+    logger.info("  Step 2: Transcription (model: %s, thinking: %s)...",
+                transcription_model, transcription_thinking)
+    regions = transcribe_regions(client, image_path, detected, transcription_model, transcription_thinking)
     logger.info("  Transcribed %d regions", len(regions))
 
     # Step 2.5 – Consistency / Deduplication check
     if run_consistency_check:
-        logger.info("  Step 2.5: Consistency check...")
+        logger.info("  Step 2.5: Consistency check (model: %s)...", consistency_model)
         regions, issues = check_and_fix_regions(
-            client, regions, model_id, thinking_level="low"
+            client, regions, consistency_model, thinking_level="low"
         )
         errors   = [i for i in issues if i.get("severity") != "warning"]
         warnings = [i for i in issues if i.get("severity") == "warning"]
@@ -217,8 +236,8 @@ def process_page(
 
     # Step 3 – NER
     full_text = build_full_text(regions)
-    logger.info("  Step 3: NER on %d chars...", len(full_text))
-    entities = perform_ner(client, full_text, entity_types, model_id, thinking_level)
+    logger.info("  Step 3: NER on %d chars (model: %s)...", len(full_text), ner_model)
+    entities = perform_ner(client, full_text, entity_types, ner_model, thinking_level)
     logger.info("  Found %d entities", len(entities))
 
     # Step 4 – Geocoding
@@ -257,8 +276,18 @@ def process_book(
     run_consistency_check: bool = True,
     start_page: Optional[int] = None,
     end_page: Optional[int] = None,
+    *,
+    model_id_layout: str | None = None,
+    model_id_transcription: str | None = None,
+    model_id_consistency: str | None = None,
+    model_id_ner: str | None = None,
 ) -> List[PageResult]:
-    """Process all pages in image_folder through the full pipeline."""
+    """Process all pages in image_folder through the full pipeline.
+
+    `model_id` is the default applied to every LLM stage. Pass any of
+    `model_id_layout`, `model_id_transcription`, `model_id_consistency`,
+    `model_id_ner` to override the model for that stage only.
+    """
     image_folder = Path(image_folder)
     output_folder = Path(output_folder)
     json_folder = output_folder / "json"
@@ -270,6 +299,14 @@ def process_book(
         return []
 
     logger.info("Found %d images in %s", len(image_files), image_folder)
+    logger.info(
+        "Models — default: %s | layout: %s | transcription: %s | consistency: %s | ner: %s",
+        model_id,
+        model_id_layout        or model_id,
+        model_id_transcription or model_id,
+        model_id_consistency   or model_id,
+        model_id_ner           or model_id,
+    )
 
     subset = image_files[start_page:end_page]
     logger.info("Processing %d pages...", len(subset))
@@ -287,6 +324,10 @@ def process_book(
                 thinking_level_transcription=thinking_level_transcription,
                 run_consistency_check=run_consistency_check,
                 geo_cache=geo_cache,
+                model_id_layout=model_id_layout,
+                model_id_transcription=model_id_transcription,
+                model_id_consistency=model_id_consistency,
+                model_id_ner=model_id_ner,
             )
             results.append(result)
 
