@@ -15,7 +15,20 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 
 GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
-MODEL_ID: str = "gemini-3-flash-preview"
+
+# Default model used for ALL stages unless overridden below.
+MODEL_ID: str = os.environ.get("MODEL_ID") or "gemini-3-flash-preview"
+
+# Per-stage model overrides (optional).
+# Set to a Gemini model ID (e.g. "gemini-3.1-pro-preview",
+# "gemini-3.1-flash-lite-preview") to use a different model for that stage.
+# Leave as None to fall back to MODEL_ID.
+# Each can also be set via an environment variable of the same name.
+MODEL_ID_LAYOUT:        str | None = os.environ.get("MODEL_ID_LAYOUT")        or None
+MODEL_ID_TRANSCRIPTION: str | None = os.environ.get("MODEL_ID_TRANSCRIPTION") or None
+MODEL_ID_CONSISTENCY:   str | None = os.environ.get("MODEL_ID_CONSISTENCY")   or None
+MODEL_ID_NER:           str | None = os.environ.get("MODEL_ID_NER")           or None
+
 THINKING_LEVEL: str = "medium"  # default fallback
 THINKING_LEVEL_LAYOUT: str = "high"  # complex layouts need deeper reasoning
 THINKING_LEVEL_TRANSCRIPTION: str = "low"  # transcription is more straightforward
