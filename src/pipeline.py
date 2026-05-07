@@ -180,6 +180,8 @@ def process_page(
     model_id_transcription: str | None = None,
     model_id_consistency: str | None = None,
     model_id_ner: str | None = None,
+    thinking_level_consistency: str | None = None,
+    thinking_level_ner: str | None = None,
 ) -> PageResult:
     """Run the full pipeline for one Humboldt journal page.
 
@@ -187,6 +189,11 @@ def process_page(
     `model_id_layout` / `model_id_transcription` / `model_id_consistency` /
     `model_id_ner` override the model for that stage only; if any is None,
     the stage falls back to `model_id`.
+
+    Per-stage thinking levels follow the same pattern. If a per-stage
+    thinking level is None, the layout/transcription/NER stages fall back to
+    `thinking_level`. The consistency check defaults to `"low"` when not
+    overridden (preserving previous behaviour).
     """
     image_path = Path(image_path)
     folio_label = extract_folio_label(image_path.name)
@@ -198,9 +205,11 @@ def process_page(
     consistency_model   = model_id_consistency   or model_id
     ner_model           = model_id_ner           or model_id
 
-    # Use separate thinking levels if provided, otherwise fall back to default
-    layout_thinking = thinking_level_layout or thinking_level
+    # Resolve per-stage thinking levels
+    layout_thinking        = thinking_level_layout        or thinking_level
     transcription_thinking = thinking_level_transcription or thinking_level
+    consistency_thinking   = thinking_level_consistency   or "low"   # preserve old default
+    ner_thinking           = thinking_level_ner           or thinking_level
 
     # Step 1 – Region Detection (high thinking for complex layouts)
     logger.info("  Step 1: Region detection (model: %s, thinking: %s)...",
@@ -216,9 +225,10 @@ def process_page(
 
     # Step 2.5 – Consistency / Deduplication check
     if run_consistency_check:
-        logger.info("  Step 2.5: Consistency check (model: %s)...", consistency_model)
+        logger.info("  Step 2.5: Consistency check (model: %s, thinking: %s)...",
+                    consistency_model, consistency_thinking)
         regions, issues = check_and_fix_regions(
-            client, regions, consistency_model, thinking_level="low"
+            client, regions, consistency_model, thinking_level=consistency_thinking
         )
         errors   = [i for i in issues if i.get("severity") != "warning"]
         warnings = [i for i in issues if i.get("severity") == "warning"]
@@ -236,8 +246,9 @@ def process_page(
 
     # Step 3 – NER
     full_text = build_full_text(regions)
-    logger.info("  Step 3: NER on %d chars (model: %s)...", len(full_text), ner_model)
-    entities = perform_ner(client, full_text, entity_types, ner_model, thinking_level)
+    logger.info("  Step 3: NER on %d chars (model: %s, thinking: %s)...",
+                len(full_text), ner_model, ner_thinking)
+    entities = perform_ner(client, full_text, entity_types, ner_model, ner_thinking)
     logger.info("  Found %d entities", len(entities))
 
     # Step 4 – Geocoding
@@ -281,6 +292,8 @@ def process_book(
     model_id_transcription: str | None = None,
     model_id_consistency: str | None = None,
     model_id_ner: str | None = None,
+    thinking_level_consistency: str | None = None,
+    thinking_level_ner: str | None = None,
 ) -> List[PageResult]:
     """Process all pages in image_folder through the full pipeline.
 
@@ -328,6 +341,8 @@ def process_book(
                 model_id_transcription=model_id_transcription,
                 model_id_consistency=model_id_consistency,
                 model_id_ner=model_id_ner,
+                thinking_level_consistency=thinking_level_consistency,
+                thinking_level_ner=thinking_level_ner,
             )
             results.append(result)
 
