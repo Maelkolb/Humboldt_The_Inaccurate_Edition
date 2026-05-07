@@ -38,8 +38,7 @@ logger = logging.getLogger(__name__)
 
 CONSISTENCY_CHECK_PROMPT = """\
 You are a scholarly editor reviewing the output of an automated transcription
-pipeline applied to Alexander von Humboldt's American travel journal
-(Amerikanische Reisetagebücher, Venezuela 1799–1804).
+pipeline applied to Alexander von Humboldt's travel journal.
 
 The pipeline detected regions on the page and transcribed each one. Your task:
 detect and fix five specific quality problems in the transcriptions below.
@@ -60,7 +59,7 @@ PROBLEMS TO DETECT AND FIX:
    region is genuinely empty in the image, keep it but note that.
 
 4. LANGUAGE MISMATCH: A region is labelled ["de"] but the content is clearly
-   French or Spanish (or vice versa). Correct the languages list.
+   French or Spanish or english (or vice versa). Correct the languages list.
 
 5. IMPLAUSIBLE ENTRY SEQUENCE: Entry numbers across entry_heading and main_text
    regions (e.g. "50)", "51)", "99)") contain a number that is far out of
