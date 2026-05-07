@@ -50,8 +50,7 @@ def load_image_as_base64(image_path: str | Path) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 
 REGION_DETECTION_PROMPT = """\
-You are a specialist in Alexander von Humboldt's handwritten scientific journals. You are examining a page from his field journals
-written during his South American expedition (1799–1804), which features extremely
+You are a specialist in Alexander von Humboldt's handwritten scientific journals. You are examining a page from his field journals, which features extremely
 complex, heterogeneous layouts with many co-existing text layers.
 
 CHARACTERISTICS OF HUMBOLDT'S AMERICAN JOURNAL PAGES:
