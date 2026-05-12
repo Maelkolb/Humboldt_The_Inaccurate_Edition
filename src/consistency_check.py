@@ -13,8 +13,6 @@ Problems detected and fixed:
    the transcription (empty content when has_text was true).
 4. LANGUAGE INCONSISTENCIES – a "de" region that is clearly French/Latin/Spanish
    or vice versa.
-5. ENTRY-NUMBER INCONSISTENCIES – entry numbers that don't form a plausible
-   sequence (e.g. 50, 51, 99 → likely a misread).
 
 The check uses a single structured LLM call that returns a list of issues and
 corrected region transcriptions. Corrections are applied in-place.
@@ -60,10 +58,6 @@ PROBLEMS TO DETECT AND FIX:
 
 4. LANGUAGE MISMATCH: A region is labelled ["de"] but the content is clearly
    French or Spanish or english (or vice versa). Correct the languages list.
-
-5. IMPLAUSIBLE ENTRY SEQUENCE: Entry numbers across entry_heading and main_text
-   regions (e.g. "50)", "51)", "99)") contain a number that is far out of
-   sequence, suggesting a misread digit. Flag it for human review.
 
 TRANSCRIBED REGIONS (JSON):
 {regions_json}
