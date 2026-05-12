@@ -552,10 +552,12 @@ def _build_doc_panel(
         slots.append(
             f'<div class="doc-slot doc-slot--{r.region_type}{extras}" '
             f'style="top:{top:.3f}%;left:{left:.3f}%;'
-            f'width:{width:.3f}%;height:{height:.3f}%;'
+            f'width:{width:.3f}%;min-height:{height:.3f}%;'
             f'--slot-color:{color};" '
             f'data-region-idx="{r.region_index}" '
             f'data-region-type="{r.region_type}" '
+            f'data-orig-top="{top:.3f}" '
+            f'data-orig-h="{height:.3f}" '
             f'tabindex="0">'
             f'{chip}'
             f'<div class="doc-slot-body">{inner}</div>'
@@ -2260,7 +2262,9 @@ body.view-text .facs-panel{display:none}
     inset 0 0 0 1px rgba(255, 255, 255, .35),
     inset 0 -20px 50px rgba(140, 100, 50, .04),
     var(--sh-2);
-  overflow:hidden;
+  /* visible (not hidden) — when JS reflow pushes overlapping slots down,
+     the canvas grows via min-height to swallow them rather than clipping. */
+  overflow:visible;
 }
 
 /* Subtle grain on the document canvas */
@@ -2287,11 +2291,15 @@ body.view-text .facs-panel{display:none}
 .doc-rule--top{top:4%}
 .doc-rule--bottom{bottom:4%}
 
-/* Region slots — minimal chrome, typography is the design */
+/* Region slots — minimal chrome, typography is the design.
+   The slot is positioned by bbox and uses *min-height* (set inline) so it
+   can grow to fit content that's taller than the original ink extent —
+   important for tables and dense main_text passages. Overflow is visible;
+   overlaps are then prevented by a JS reflow pass at render time. */
 .doc-slot{
   position:absolute;
   padding:.18rem .28rem;
-  overflow:hidden;
+  overflow:visible;
   cursor:pointer;
   transition:background .2s var(--ease),
              box-shadow .2s var(--ease),
@@ -2299,18 +2307,22 @@ body.view-text .facs-panel{display:none}
   border-radius:1px;
   outline:1px solid transparent;
   outline-offset:-1px;
+  /* Faint paper-tinted background so overlapping regions are still legible
+     in the rare case the JS reflow can't fully resolve them. */
+  background:rgba(250, 243, 224, .35);
 }
 .doc-slot:hover, .doc-slot:focus-visible{
-  background:rgba(255, 248, 222, .55);
+  background:var(--paper-light);
   outline:1px solid color-mix(in srgb, var(--slot-color) 35%, transparent);
-  z-index:4;
+  box-shadow:0 2px 10px rgba(80, 56, 24, .12);
+  z-index:40;
 }
 .doc-slot.is-sync{
   background:color-mix(in srgb, var(--slot-color) 8%, var(--paper-light));
   outline:1.5px solid color-mix(in srgb, var(--slot-color) 60%, transparent);
   box-shadow:0 0 0 3px color-mix(in srgb, var(--slot-color) 18%, transparent),
              var(--sh-2);
-  z-index:5;
+  z-index:50;
 }
 
 /* The tiny region-type indicator chip */
@@ -2342,8 +2354,9 @@ body.view-text .facs-panel{display:none}
 }
 
 .doc-slot-body{
-  height:100%;
-  overflow:hidden;
+  height:auto;
+  min-height:100%;
+  overflow:visible;
   font-family:var(--f-body);
   color:var(--text);
   line-height:1.45;
@@ -2395,7 +2408,7 @@ body.view-text .facs-panel{display:none}
 .doc-slot--observation_table .doc-slot-body,
 .doc-slot--instrument_list .doc-slot-body{
   font-family:var(--f-mono);
-  font-size:clamp(.54rem, 0.78cqi, .72rem);
+  font-size:clamp(.52rem, 0.74cqi, .68rem);
   color:var(--text);
 }
 .doc-data{
@@ -2403,31 +2416,42 @@ body.view-text .facs-panel{display:none}
   white-space:pre-wrap;
   margin:0;
   font-size:inherit;
-  line-height:1.45;
+  line-height:1.35;
 }
 .doc-slot--observation_table .data-table,
 .doc-slot--instrument_list .data-table{
   width:100%;
-  font-size:.92em;
+  font-size:.95em;
+  margin:0;
+  box-shadow:none;
+  background:transparent;
 }
 .doc-slot--observation_table table,
 .doc-slot--instrument_list table{
   border-collapse:collapse;
 }
+.doc-slot--observation_table caption,
+.doc-slot--instrument_list caption{
+  font-size:.85em;
+  padding:.12rem .25rem;
+  background:transparent;
+}
 .doc-slot--observation_table th,
 .doc-slot--observation_table td,
 .doc-slot--instrument_list th,
 .doc-slot--instrument_list td{
-  padding:.1rem .35rem;
+  padding:.05rem .3rem;
   border-bottom:1px solid var(--rule-soft);
   text-align:left;
   font-variant-numeric:tabular-nums;
+  line-height:1.25;
 }
 .doc-slot--observation_table th,
 .doc-slot--instrument_list th{
   font-weight:600;
   color:var(--ink);
   border-bottom-color:var(--rule);
+  background:rgba(120, 90, 50, .05);
 }
 
 .doc-slot--sketch{
@@ -3393,8 +3417,133 @@ _JS = r"""
   document.addEventListener('webkitfullscreenchange', updateFsButtons);
 
   // ============================================================
-  // Click-to-sync: facsimile overlay <-> transcription
+  // Document view overlap resolver
+  // ------------------------------------------------------------
+  // The Document view positions each region by its bbox (top%, left%,
+  // width%, min-height%). Rendered HTML text is often taller than the
+  // ink was on the original page — tables in particular take many lines
+  // for a few rows, and a paragraph of main_text may wrap to more lines
+  // than the bbox allotted. With overflow:visible and min-height, slots
+  // grow as needed; this pass then pushes vertically-adjacent slots
+  // downward so nothing overlaps. The canvas is expanded via min-height
+  // if the cascade pushes the bottom-most slot past the natural page
+  // aspect, so nothing is cut off either.
   // ============================================================
+  function reflowDocCanvas(canvas){
+    if(!canvas) return;
+    var slots = Array.from(canvas.querySelectorAll('.doc-slot'));
+    if(!slots.length) return;
+    // Drop any prior canvas growth so we re-measure from scratch.
+    canvas.style.minHeight = '';
+    // Reset each slot to its original bbox top% before measuring.
+    slots.forEach(function(s){
+      if(s.dataset.origTop != null && s.dataset.origTop !== ''){
+        s.style.top = s.dataset.origTop + '%';
+      }
+    });
+    var canvasH = canvas.getBoundingClientRect().height;
+    if(!canvasH) return;     // hidden / not laid out yet — bail
+
+    var items = slots.map(function(s){
+      var top   = parseFloat(s.style.top || '0');
+      var left  = parseFloat(s.style.left || '0');
+      var width = parseFloat(s.style.width || '0');
+      return {
+        slot: s,
+        left: left,
+        right: left + width,
+        topPx: (top / 100) * canvasH,
+        heightPx: s.offsetHeight,
+      };
+    });
+
+    var GAP_PX = 4;     // small visual breathing room between regions
+
+    // Cascading resolve — repeat until no further pushes needed
+    // (or hit a safety cap so we never run away).
+    for(var pass = 0; pass < 8; pass++){
+      items.sort(function(a, b){ return a.topPx - b.topPx; });
+      var changed = false;
+      for(var i = 0; i < items.length; i++){
+        var cur = items[i];
+        var curBottom = cur.topPx + cur.heightPx;
+        for(var j = i + 1; j < items.length; j++){
+          var other = items[j];
+          // Horizontal-band intersection? If not, no overlap possible.
+          var xOverlap = !(other.right <= cur.left + 0.2
+                        || other.left  >= cur.right - 0.2);
+          if(!xOverlap) continue;
+          if(other.topPx < curBottom + GAP_PX){
+            other.topPx = curBottom + GAP_PX;
+            changed = true;
+          }
+        }
+      }
+      if(!changed) break;
+    }
+
+    // Write the new top positions back as percentages.
+    items.forEach(function(it){
+      it.slot.style.top = (it.topPx / canvasH * 100).toFixed(3) + '%';
+    });
+
+    // If the cascade pushed the last slot past the canvas's natural
+    // (aspect-derived) bottom, grow the canvas so it isn't clipped
+    // visually — the page silhouette just becomes a bit taller.
+    var maxBottom = 0;
+    items.forEach(function(it){
+      var b = it.topPx + it.heightPx;
+      if(b > maxBottom) maxBottom = b;
+    });
+    if(maxBottom > canvasH){
+      canvas.style.minHeight = Math.ceil(maxBottom + 6) + 'px';
+    }
+  }
+
+  function reflowPage(page){
+    if(!page) return;
+    page.querySelectorAll('.doc-canvas').forEach(reflowDocCanvas);
+  }
+
+  // Initial pass for the active page, and again once webfonts settle
+  // (since Fraunces/Newsreader change text wrapping vs. fallbacks).
+  function reflowActive(){ reflowPage(pages[curPage]); }
+  // Defer slightly so layout is stable.
+  requestAnimationFrame(function(){
+    setTimeout(reflowActive, 0);
+  });
+  if(document.fonts && document.fonts.ready){
+    document.fonts.ready.then(reflowActive).catch(function(){});
+  }
+
+  // Re-run on resize (debounced) — canvas width changes alter text wrap.
+  var resizeT;
+  window.addEventListener('resize', function(){
+    clearTimeout(resizeT);
+    resizeT = setTimeout(reflowActive, 120);
+  });
+
+  // Re-run when the user flips to a new page or toggles into Document
+  // mode (a previously-hidden page has no layout, so its first reflow
+  // can only happen now).
+  var origShowPage = showPage;
+  showPage = function(i){
+    origShowPage(i);
+    // Wait a frame so the newly-shown page has dimensions.
+    requestAnimationFrame(function(){ reflowPage(pages[curPage]); });
+  };
+  pages.forEach(function(page){
+    var btns = page.querySelectorAll('.trans-toggle button');
+    btns.forEach(function(btn){
+      btn.addEventListener('click', function(){
+        // After the inline mode-switch handler runs, reflow if we're in
+        // document mode (reading mode doesn't need it).
+        if(btn.dataset.transMode === 'document'){
+          requestAnimationFrame(function(){ reflowPage(page); });
+        }
+      });
+    });
+  });
   function clearSync(page){
     page.querySelectorAll('.ov-box.is-sync, .r.is-sync, .doc-slot.is-sync')
       .forEach(function(el){ el.classList.remove('is-sync'); });
