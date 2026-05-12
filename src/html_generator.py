@@ -3445,6 +3445,14 @@ _JS = r"""
   //       new canvas bottom — where the trans-panel's overflow:hidden
   //       would clip them. That is exactly the "cut off at bottom"
   //       bug. Pixel offsets are stable through canvas-height changes.
+  //
+  //       The cascade uses a *mutual* x-overlap test: two regions
+  //       only count as vertically stacked (and so cascade-able) if
+  //       their shared x-range is ≥ 30 % of the wider region. This
+  //       is what lets a narrow left-margin note coexist side-by-
+  //       side with a wide body paragraph instead of pushing it
+  //       down. Two paragraphs of equal width still hit ratio 1.0
+  //       and stack normally.
   // ============================================================
 
   // Per-region-type ceiling on the unified scale factor. Display &
@@ -3542,6 +3550,15 @@ _JS = r"""
     });
 
     // ---- Step 3: cascade-resolve any vertical overlaps ----------------
+    // Two regions are considered "vertical neighbours" (i.e. one should
+    // sit below the other) only if their horizontal ranges genuinely
+    // share a lane — defined as their shared x-range covering at least
+    // MIN_X_OVERLAP_RATIO of the wider of the two. This is what lets a
+    // narrow left-margin note (x ≈ 0–15 %) sit *beside* a wide body
+    // paragraph (x ≈ 0–90 %): their shared range is only 15 / 90 ≈ 17 %
+    // of the wider region, below the threshold, so the cascade leaves
+    // them where their bboxes put them. Two stacked paragraphs of the
+    // same width still hit ratio 1.0 and get cascaded as before.
     var items = slots.map(function(s){
       var top   = parseFloat(s.style.top || '0');
       var left  = parseFloat(s.style.left || '0');
@@ -3556,17 +3573,24 @@ _JS = r"""
     });
 
     var GAP_PX = 4;
+    var MIN_X_OVERLAP_RATIO = 0.3;
     for(var pass = 0; pass < 8; pass++){
       items.sort(function(a, b){ return a.topPx - b.topPx; });
       var changed = false;
       for(var i = 0; i < items.length; i++){
         var cur = items[i];
         var curBottom = cur.topPx + cur.heightPx;
+        var curW = cur.right - cur.left;
         for(var j = i + 1; j < items.length; j++){
           var other = items[j];
-          var xOverlap = !(other.right <= cur.left + 0.2
-                        || other.left  >= cur.right - 0.2);
-          if(!xOverlap) continue;
+          // Mutual horizontal overlap, as a fraction of the wider region.
+          var ovL = Math.max(cur.left, other.left);
+          var ovR = Math.min(cur.right, other.right);
+          var ov  = ovR - ovL;
+          if(ov <= 0.2) continue;                   // no real overlap
+          var maxW = Math.max(curW, other.right - other.left);
+          if(maxW <= 0 || ov / maxW < MIN_X_OVERLAP_RATIO) continue;
+          // Side-by-side enough? skip. Otherwise enforce the gap.
           if(other.topPx < curBottom + GAP_PX){
             other.topPx = curBottom + GAP_PX;
             changed = true;
