@@ -3420,106 +3420,128 @@ _JS = r"""
   document.addEventListener('webkitfullscreenchange', updateFsButtons);
 
   // ============================================================
-  // Document view auto-fit + overlap resolver
+  // Document view layout pass — per-type scaling + overlap reflow
   // ------------------------------------------------------------
-  // Two-step layout pass for the bbox-positioned Document view:
+  // Three-step pass for the bbox-positioned Document view:
   //
-  //   (1) autoFitSlot — for each slot, measure the natural content
-  //       height; if it's well under the bbox's allotted height, scale
-  //       the font up (via the CSS variable --slot-scale) so the bbox
-  //       is filled comfortably (~85 %). Slots that already fill or
-  //       overflow their bbox stay at scale 1 — the reflow handles
-  //       those by pushing later slots down instead.
+  //   (1) Measure each slot's natural content height at scale 1.
+  //       The slot's inline min-height (from the bbox) is temporarily
+  //       neutralised so the body's offsetHeight reflects *real*
+  //       content, not the bbox-stretched value.
   //
-  //   (2) reflowDocCanvas — after autofit has settled fonts, walk the
-  //       slots in y-order and push any horizontally-overlapping later
-  //       slot down by a small gap. Grow the canvas via min-height if
-  //       the cascade pushes content past the natural page bottom.
+  //   (2) Compute ONE unified scale per region type. Every instance
+  //       of "entry_heading" renders at the same size; same for
+  //       "main_text", "marginal_note", etc. The chosen scale is the
+  //       largest at which *every* instance of the type still fits
+  //       its bbox — so a short heading in a roomy bbox doesn't get
+  //       blown up while a longer heading next door stays small.
+  //       Visual consistency within a type; fit constraint across.
+  //
+  //   (3) Cascade-resolve vertical overlaps and write tops back in
+  //       *pixels* (not percentages of canvasH). If we wrote them as
+  //       % and then grew the canvas via min-height to swallow
+  //       overflow, every percentage would suddenly refer to a
+  //       taller box and slots near the bottom would slide past the
+  //       new canvas bottom — where the trans-panel's overflow:hidden
+  //       would clip them. That is exactly the "cut off at bottom"
+  //       bug. Pixel offsets are stable through canvas-height changes.
   // ============================================================
 
-  // Per-region-type ceiling on the scale factor. Display & body text
-  // can grow more aggressively; data-style content (tables, formulas)
-  // is kept tighter so columns and numerals stay legible.
+  // Per-region-type ceiling on the unified scale factor. Display &
+  // body text can grow modestly; data-style content (tables,
+  // formulas) is kept tighter so columns and numerals stay legible.
+  // This is only a *ceiling* — the actual chosen scale is the
+  // largest that fits every instance of the type, which often lands
+  // well below the cap.
   var SCALE_CAP_BY_TYPE = {
-    entry_heading:    2.2,
-    main_text:        2.0,
-    marginal_note:    1.8,
-    coordinates:      1.8,
-    bibliographic_ref:1.7,
-    crossed_out:      1.8,
-    catch_phrase:     2.2,
-    page_number:      2.4,
-    sketch:           1.6,
-    calculation:      1.5,
-    observation_table:1.4,
-    instrument_list:  1.4,
-    pasted_slip:      1.7,
+    entry_heading:    1.8,
+    main_text:        1.4,
+    marginal_note:    1.5,
+    coordinates:      1.5,
+    bibliographic_ref:1.4,
+    crossed_out:      1.5,
+    catch_phrase:     1.8,
+    page_number:      2.0,
+    sketch:           1.4,
+    calculation:      1.3,
+    observation_table:1.2,
+    instrument_list:  1.2,
+    pasted_slip:      1.4,
   };
-
-  function autoFitSlot(slot, canvasH){
-    var origHPct = parseFloat(slot.dataset.origH || '0');
-    if(origHPct < 2 || !canvasH) return;
-    var bboxHpx = (origHPct / 100) * canvasH;
-    if(bboxHpx < 12) return;                        // too small to bother
-
-    var body = slot.querySelector('.doc-slot-body');
-    if(!body) return;
-
-    var type = slot.dataset.regionType || '';
-    var cap  = SCALE_CAP_BY_TYPE[type] || 1.8;
-
-    // Reset scale so we measure the natural content height.
-    slot.style.setProperty('--slot-scale', '1');
-    // The slot's min-height (set inline by Python) would stretch the
-    // body to the bbox even when content is shorter, hiding the slack
-    // we want to detect. Temporarily lift it so offsetHeight reflects
-    // *real* content size.
-    var savedMinH = slot.style.minHeight;
-    slot.style.minHeight = '0';
-
-    var scale = 1;
-    for(var i = 0; i < 4; i++){
-      var natural = body.offsetHeight;
-      if(natural < 1) break;
-      // Already at ~75 % fill (or overflowing) — leave alone.
-      if(natural >= bboxHpx * 0.75) break;
-
-      // sqrt damping: paragraph height grows roughly with scale^1.5–2
-      // because text re-wraps as chars get wider. sqrt prevents
-      // overshoot for wrapping content while still helping short
-      // single-line content reach a sensible size.
-      var ratio = (bboxHpx * 0.85) / natural;
-      var next  = scale * Math.sqrt(ratio);
-      next = Math.max(1, Math.min(next, cap));
-
-      if(Math.abs(next - scale) < 0.02) break;     // converged
-      scale = next;
-      slot.style.setProperty('--slot-scale', scale.toFixed(3));
-    }
-
-    // Restore min-height so the slot can serve as a layout anchor again.
-    slot.style.minHeight = savedMinH;
-  }
 
   function reflowDocCanvas(canvas){
     if(!canvas) return;
     var slots = Array.from(canvas.querySelectorAll('.doc-slot'));
     if(!slots.length) return;
-    // Reset prior canvas growth and per-slot positions, so we measure
-    // from the natural aspect-derived geometry every time.
+
+    // ---- Reset: drop prior growth, restore original top% and scale 1.
     canvas.style.minHeight = '';
     slots.forEach(function(s){
       if(s.dataset.origTop != null && s.dataset.origTop !== ''){
         s.style.top = s.dataset.origTop + '%';
       }
+      s.style.setProperty('--slot-scale', '1');
     });
     var canvasH = canvas.getBoundingClientRect().height;
     if(!canvasH) return;                            // hidden / not laid out
 
-    // ---- step 1: autofit each slot's font to its bbox -------------
-    slots.forEach(function(s){ autoFitSlot(s, canvasH); });
+    // ---- Step 1: measure each slot's natural content height -----------
+    var measurements = slots.map(function(s){
+      var savedMinH = s.style.minHeight;
+      s.style.minHeight = '0';                      // lift the bbox floor
+      var body = s.querySelector('.doc-slot-body');
+      var natural = body ? body.offsetHeight : 0;
+      s.style.minHeight = savedMinH;                // restore
+      var origH = parseFloat(s.dataset.origH || '0');
+      return {
+        slot: s,
+        type: s.dataset.regionType || '',
+        natural: natural,
+        bboxH: (origH / 100) * canvasH,
+      };
+    });
 
-    // ---- step 2: cascade-resolve any remaining vertical overlaps --
+    // ---- Step 2: compute one unified scale per region-type ------------
+    // Height grows roughly as natural × scale^1.5 (between linear for
+    // single-line content and ~quadratic for wrapping paragraphs).
+    // The max safe scale for one instance is therefore:
+    //
+    //   scale_i = (bboxH_i × SAFETY_FILL / natural_i) ^ (1 / 1.5)
+    //
+    // Per type we take the minimum across instances (so the most-
+    // constrained instance wins), capped by SCALE_CAP_BY_TYPE. Any
+    // instance already filling ≥ 78 % of its bbox at scale 1 forces
+    // the type to stay at 1 (it would overflow at any higher scale).
+    var byType = {};
+    measurements.forEach(function(m){
+      (byType[m.type] = byType[m.type] || []).push(m);
+    });
+
+    var SAFETY_FILL = 0.88;
+    var GROW_EXP    = 1.5;
+
+    var typeScales = {};
+    Object.keys(byType).forEach(function(type){
+      var cap = SCALE_CAP_BY_TYPE[type] || 1.4;
+      var maxAllowed = cap;
+      byType[type].forEach(function(m){
+        if(m.bboxH < 8 || m.natural < 1) return;
+        if(m.natural >= m.bboxH * 0.78){
+          maxAllowed = Math.min(maxAllowed, 1.0);
+          return;
+        }
+        var safe = Math.pow(m.bboxH * SAFETY_FILL / m.natural, 1/GROW_EXP);
+        maxAllowed = Math.min(maxAllowed, safe);
+      });
+      typeScales[type] = Math.max(1, maxAllowed);
+    });
+
+    measurements.forEach(function(m){
+      m.slot.style.setProperty('--slot-scale',
+        (typeScales[m.type] || 1).toFixed(3));
+    });
+
+    // ---- Step 3: cascade-resolve any vertical overlaps ----------------
     var items = slots.map(function(s){
       var top   = parseFloat(s.style.top || '0');
       var left  = parseFloat(s.style.left || '0');
@@ -3554,18 +3576,21 @@ _JS = r"""
       if(!changed) break;
     }
 
+    // Write tops in PIXELS (see comment above the function for why).
     items.forEach(function(it){
-      it.slot.style.top = (it.topPx / canvasH * 100).toFixed(3) + '%';
+      it.slot.style.top = Math.round(it.topPx) + 'px';
     });
 
     // Grow the canvas if the cascade pushed content past the bottom.
+    // Generous padding here (16 px) plus an early trigger (canvasH-8)
+    // gives a little breathing room under the last slot.
     var maxBottom = 0;
     items.forEach(function(it){
       var b = it.topPx + it.heightPx;
       if(b > maxBottom) maxBottom = b;
     });
-    if(maxBottom > canvasH){
-      canvas.style.minHeight = Math.ceil(maxBottom + 6) + 'px';
+    if(maxBottom > canvasH - 8){
+      canvas.style.minHeight = Math.ceil(maxBottom + 16) + 'px';
     }
   }
 
