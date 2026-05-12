@@ -189,9 +189,6 @@ Respond ONLY with a JSON array matching each region (same order, same indices):
     }}
 ]
 
-CRITICAL: For Humboldt's difficult handwriting, an uncertain reading marked [?]
-is MUCH better than a wrong guess. Accuracy matters more than completeness.
-Do NOT duplicate text between regions.
 """
 
 
