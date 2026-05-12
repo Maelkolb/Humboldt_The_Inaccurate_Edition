@@ -828,6 +828,14 @@ _ICON_PATHS = {
         '<path d="M4 7V4h3M16 4h-3v3M4 13v3h3M13 16h3v-3" fill="none" '
         'stroke="currentColor" stroke-width="1.5" stroke-linecap="round" '
         'stroke-linejoin="round"/>',
+    "fullscreen":
+        '<path d="M3 7V3h4M17 7V3h-4M3 13v4h4M17 13v4h-4" fill="none" '
+        'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" '
+        'stroke-linejoin="round"/>',
+    "fullscreen-exit":
+        '<path d="M7 3v4H3M13 3v4h4M7 17v-4H3M13 17v-4h4" fill="none" '
+        'stroke="currentColor" stroke-width="1.6" stroke-linecap="round" '
+        'stroke-linejoin="round"/>',
     "filter":
         '<path d="M3 5h14l-5 6v5l-4 1v-6L3 5z" fill="none" '
         'stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" '
@@ -1000,10 +1008,17 @@ def generate_html_edition(
                 '            class="facs-tool facs-tool--zreset" '
                 '            title="Fit to frame">'
                 f'      {_icon("fit", 13)}</button>'
+                '    <button type="button" '
+                '            class="facs-tool facs-tool--fullscreen" '
+                '            title="Toggle fullscreen" '
+                '            aria-label="Toggle fullscreen">'
+                f'      {_icon("fullscreen", 13)}</button>'
                 '  </div>'
                 '  <div class="facs-stage">'
                 '    <div class="facs-frame" data-zoom="1">'
-                f'      <div class="facs-canvas">{facs_img}{overlay}</div>'
+                f'      <div class="facs-canvas" '
+                f'style="--page-aspect:{page_aspect:.4f};">'
+                f'{facs_img}{overlay}</div>'
                 '    </div>'
                 '    <div class="facs-hint">'
                 '      <span>Drag · wheel · double-click to fit</span>'
@@ -1987,7 +2002,10 @@ body.view-text .facs-panel{display:none}
   border:1px solid var(--rule);
   border-radius:var(--r-md);
   box-shadow:var(--sh-2);
-  max-height:calc(100vh - var(--masthead-h) - var(--legend-h) - 1.5rem);
+  /* Use *height* (not max-height) so the sticky panel actually fills the
+     viewport and the image gets the room it needs. */
+  height:calc(100vh - var(--masthead-h) - var(--legend-h) - 1.5rem);
+  min-height:480px;
   overflow:hidden;
 }
 .facs-toolbar{
@@ -1997,6 +2015,7 @@ body.view-text .facs-panel{display:none}
   background:linear-gradient(180deg,
     rgba(255, 248, 222, .8),
     rgba(246, 236, 206, .8));
+  flex-shrink:0;
 }
 .facs-toolbar-spacer{flex:1}
 .facs-tool{
@@ -2021,7 +2040,8 @@ body.view-text .facs-panel{display:none}
   color:var(--paper-light);
   border-color:var(--ink);
 }
-.facs-tool--zin, .facs-tool--zout, .facs-tool--zreset{
+.facs-tool--zin, .facs-tool--zout, .facs-tool--zreset,
+.facs-tool--fullscreen{
   width:30px;height:30px;
   padding:0;
   justify-content:center;
@@ -2038,10 +2058,10 @@ body.view-text .facs-panel{display:none}
 .facs-stage{
   position:relative;
   flex:1;
+  min-height:0;            /* lets the flex item shrink to share height */
   overflow:hidden;
   background:
     radial-gradient(ellipse at center, #c9b993 0%, #a89373 100%);
-  min-height:340px;
   cursor:grab;
 }
 .facs-stage.is-grabbing{cursor:grabbing}
@@ -2049,24 +2069,33 @@ body.view-text .facs-panel{display:none}
   position:absolute;
   inset:0;
   display:flex;align-items:center;justify-content:center;
+  padding:.4rem;
   transform-origin:center center;
   transition:transform .25s var(--ease-out);
   will-change:transform;
 }
 .facs-frame.is-moving{transition:none}
+/* The canvas uses aspect-ratio so it always shows the *full* image,
+   shrinking to fit whichever stage dimension is the binding constraint. */
 .facs-canvas{
   position:relative;
-  display:inline-block;
+  aspect-ratio: var(--page-aspect, 0.72) / 1;
+  max-width:100%;
+  max-height:100%;
+  width:auto;
+  height:auto;
   box-shadow:
     0 4px 14px rgba(0, 0, 0, .25),
     0 14px 50px rgba(0, 0, 0, .3);
   border-radius:2px;
   overflow:hidden;
+  background:var(--paper-light);
 }
 .facs-img{
   display:block;
-  max-width:100%;
-  max-height:calc(100vh - var(--masthead-h) - var(--legend-h) - 8rem);
+  width:100%;
+  height:100%;
+  object-fit:contain;
   user-select:none;
   -webkit-user-drag:none;
 }
@@ -2088,6 +2117,41 @@ body.view-text .facs-panel{display:none}
   opacity:.85;
 }
 .facs-stage:hover .facs-hint{opacity:.55}
+
+/* Fullscreen presentation — the panel grows to fill the viewport. */
+.facs-panel:fullscreen{
+  height:100vh;
+  max-height:100vh;
+  width:100vw;
+  border-radius:0;
+  border:0;
+  background:#1a1410;
+}
+.facs-panel:fullscreen .facs-stage{
+  background:radial-gradient(ellipse at center, #2a221a 0%, #0e0a06 100%);
+}
+.facs-panel:fullscreen .facs-toolbar{
+  background:rgba(30, 22, 14, .85);
+  border-bottom-color:rgba(255, 246, 220, .12);
+  color:var(--paper-light);
+}
+.facs-panel:fullscreen .facs-tool{
+  background:rgba(255, 246, 220, .08);
+  border-color:rgba(255, 246, 220, .18);
+  color:rgba(255, 246, 220, .85);
+}
+.facs-panel:fullscreen .facs-tool:hover{
+  background:rgba(255, 246, 220, .14);
+  color:var(--paper-light);
+}
+.facs-panel:fullscreen .facs-tool.is-on{
+  background:var(--paper-light);
+  color:var(--ink);
+  border-color:var(--paper-light);
+}
+.facs-panel:fullscreen .facs-zoom-readout{
+  color:rgba(255, 246, 220, .65);
+}
 
 /* Region overlay on facsimile */
 .region-overlay{
@@ -2938,9 +3002,12 @@ body.view-text .facs-panel{display:none}
   }
   .facs-panel{
     position:static;
+    height:auto;
     max-height:none;
+    min-height:0;
   }
   .facs-img{max-height:80vh}
+  .facs-canvas{max-height:80vh}
   .r-body--three-col{
     grid-template-columns:1fr;
   }
@@ -3292,7 +3359,38 @@ _JS = r"""
         btnOverlay.classList.toggle('is-on', !hidden);
       });
     }
+
+    // ── Fullscreen toggle ──
+    var btnFull = page.querySelector('.facs-tool--fullscreen');
+    var panel = page.querySelector('.facs-panel');
+    if(btnFull && panel){
+      btnFull.addEventListener('click', function(){
+        var fsEl = document.fullscreenElement
+                || document.webkitFullscreenElement;
+        if(fsEl){
+          (document.exitFullscreen
+            || document.webkitExitFullscreen).call(document);
+        } else {
+          var req = panel.requestFullscreen
+                 || panel.webkitRequestFullscreen;
+          if(req){
+            req.call(panel).catch(function(){ /* user cancel */ });
+          }
+        }
+      });
+    }
   });
+
+  // Update the fullscreen icon's active state on enter/exit
+  function updateFsButtons(){
+    var fsEl = document.fullscreenElement
+            || document.webkitFullscreenElement;
+    document.querySelectorAll('.facs-tool--fullscreen').forEach(function(btn){
+      btn.classList.toggle('is-on', !!fsEl && fsEl.contains(btn));
+    });
+  }
+  document.addEventListener('fullscreenchange', updateFsButtons);
+  document.addEventListener('webkitfullscreenchange', updateFsButtons);
 
   // ============================================================
   // Click-to-sync: facsimile overlay <-> transcription
@@ -3490,12 +3588,27 @@ _JS = r"""
       zoomControl:true,
       scrollWheelZoom:false
     }).setView(data.center || [data.locations[0].lat, data.locations[0].lon], 4);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 18,
-      attribution: '© OpenStreetMap'
-    }).addTo(map);
+    // CartoDB Voyager — muted scholarly palette, works from file:// origins
+    // (OpenStreetMap's own tiles reject requests without a Referer header,
+    // which means they fail when the HTML is opened as a local file.)
+    L.tileLayer(
+      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/' +
+      '{z}/{x}/{y}{r}.png',
+      {
+        maxZoom: 19,
+        subdomains: 'abcd',
+        attribution:
+          '© <a href="https://www.openstreetmap.org/copyright">' +
+          'OpenStreetMap</a> · © <a href="https://carto.com/attributions">' +
+          'CARTO</a>'
+      }
+    ).addTo(map);
     L.control.attribution({ prefix:false, position:'bottomright' })
-      .addAttribution('© OpenStreetMap')
+      .addAttribution(
+        '© <a href="https://www.openstreetmap.org/copyright">' +
+        'OpenStreetMap</a> · © <a href="https://carto.com/attributions">' +
+        'CARTO</a>'
+      )
       .addTo(map);
     var bounds = [];
     data.locations.forEach(function(loc){
