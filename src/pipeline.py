@@ -190,10 +190,6 @@ def process_page(
     `model_id_ner` override the model for that stage only; if any is None,
     the stage falls back to `model_id`.
 
-    Per-stage thinking levels follow the same pattern. If a per-stage
-    thinking level is None, the layout/transcription/NER stages fall back to
-    `thinking_level`. The consistency check defaults to `"low"` when not
-    overridden (preserving previous behaviour).
     """
     image_path = Path(image_path)
     folio_label = extract_folio_label(image_path.name)
