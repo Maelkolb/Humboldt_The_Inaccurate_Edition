@@ -40,22 +40,18 @@ You are given a page image from Humboldt's travel journal.
 and a list of detected regions. For EACH region, produce an accurate scholarly transcription.
 
 HUMBOLDT'S HANDWRITING CHARACTERISTICS (AMERICAN JOURNALS):
-- German Kurrentschrift, fluid and hasty; word spacing inconsistent
-- Common German abbreviations: "d." = der/die/das, "u." = und, "v." = von,
-  "Th." = Theil, "Anm." = Anmerkung, "s." = siehe, "vgl." = vergleiche
+- German Kurrentschrift
 - French in Latin script (often easier): species names, references, scientific terms
 - Latin in Latin script: species binomials (e.g. "Croton cascarilla"), citations
 - Spanish: place names, colonial terms (e.g. "Llanos",
   "Cumaná", "Maracaibo", "Misioneros", "Alcalde", "Corregidor")
-- Indigenous place/group names may appear in any script
 - Degree symbols ° ′ ″ used extensively for geographic coordinates and angles
 - Astronomical notation: h (hours), ' (minutes), " (seconds)
 - Alchemical symbols: ☉ (Sonne/Sun), ☿ (Quecksilber/Mercury), ♂ (Eisen/Iron)
-- Superscript small letters for abbreviations
 
 TRANSCRIPTION RULES – FOLLOW EXACTLY:
 
-1. PRESERVE original spelling:
+1. PRESERVE original spelling, transcribe the text line per line, character per character.
 
 2. MARK uncertain readings with [?]:
    - A single unclear word: "Salzburg und [?]"
@@ -81,9 +77,6 @@ TRANSCRIPTION RULES – FOLLOW EXACTLY:
       is often mirrored, very faint, or fragmentary. Do NOT transcribe it.
       Set content: "" (empty string).
       In editorial_note, write: "Bleedthrough from opposite folio — not transcribed."
-
-   Marginal notes are SEPARATE from the main text — do NOT duplicate any
-   content from adjacent main_text regions.
 
 5. PRESERVE line breaks within a region using \\n
 
