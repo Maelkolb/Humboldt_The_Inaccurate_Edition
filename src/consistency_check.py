@@ -2,7 +2,7 @@
 Consistency Check (Step 2.5) – Humboldt Journal Edition
 ========================================================
 LLM-powered post-transcription quality gate that runs after all regions have
-been transcribed for a page but BEFORE NER/Geocoding.
+been transcribed for a page.
 
 Problems detected and fixed:
 1. DUPLICATE LINES – text that appears verbatim (or near-verbatim) in two or
@@ -53,8 +53,7 @@ PROBLEMS TO DETECT AND FIX:
    be in the margin appears mid-paragraph in the main text). Flag and move it.
 
 3. EMPTY REGIONS: A region has an empty or near-empty "content" (less than 5
-   characters) when it should contain text (is_visual=false). Exception: marginal note on opposite folio, so cut off text in marginal notes should be empty. Note: if the
-   region is genuinely empty in the image, keep it but note that.
+   characters) when it should contain text (is_visual=false). Exception: marginal notes on opposite folio.
 
 4. LANGUAGE MISMATCH: A region is labelled ["de"] but the content is clearly
    French or Spanish or english (or vice versa). Correct the languages list.
@@ -92,7 +91,6 @@ RULES:
 - Only include regions in "corrected_regions" if their content actually changed.
 - When removing duplicate text, keep it in the region where it semantically
   belongs (marginal note → marginal_note region, main prose → main_text).
-- Do NOT rewrite or improve the transcription beyond fixing the listed problems.
 - Do NOT change bboxes, region_type, or region_index.
 - If in doubt about a duplicate, flag it as a warning but do NOT alter content.
 """
