@@ -19,10 +19,10 @@ This pipeline addresses all of these with custom region types, editorial convent
 | Step | Module | Description |
 |------|--------|-------------|
 | 1. Region Detection | `region_detection.py` | Identifies Humboldt-specific regions: entry headings, main text, marginal notes, calculation blocks, observation tables, sketches, crossed-out passages, interlinear additions, bibliographic references, coordinates, instrument lists |
-| 2. Transcription | `transcription.py` | Scholarly diplomatic transcription preserving original spelling, marking uncertain readings with `[?]`, tracking languages per region, noting editorial observations |
-| 3. Entity Annotation | `ner.py` | NER for persons (scientists, instrument makers), locations (historical spellings), institutions, instruments, publications, celestial objects, measurements, natural objects |
+| 2. Transcription | `transcription.py` | Scholarly diplomatic transcription, tracking languages, noting editorial observations |
+| 3. Entity Annotation | `ner.py` | NER for persons, locations, institutions, instruments, publications, celestial objects, measurements, natural objects |
 | 4. Georeferencing | `geocoding.py` | Location resolution with a historical place-name mapping (Oedenburg→Sopron, Preßburg→Bratislava, etc.) |
-| 5. HTML Edition | `html_generator.py` | Beautiful scholarly edition with side-by-side facsimile + transcription, editorial apparatus, entity highlighting, language badges, map view |
+| 5. HTML Edition | `html_generator.py` |digital edition with side-by-side facsimile + transcription, editorial apparatus, entity highlighting, map view |
 
 ## Humboldt-Specific Region Types
 
@@ -74,18 +74,7 @@ python scripts/process_journal.py --images images/ --out output/ --embed-images 
 
 # Use higher thinking for very difficult pages
 python scripts/process_journal.py --images images/ --out output/ --thinking high --embed-images
-```
 
-### 5. Open the edition
-
-Open `output/humboldt_edition.html` in your browser. Features:
-- **Side-by-side view**: Facsimile image + transcription
-- **Toggle**: Switch between dual view and text-only
-- **Entity highlighting**: Click legend chips to show/hide entity types
-- **Region filtering**: Show/hide specific region types
-- **Maps**: Click "Karte" to see geocoded locations
-- **Zoom**: Click facsimile images to zoom in
-- **Navigation**: Arrow keys or dropdown to switch pages
 
 ## Configuration
 
@@ -103,7 +92,7 @@ output/
 ├── json/
 │   ├── page_0001.json          # Per-page results (regions, entities, metadata)
 │   └── ...
-├── digital_edition_complete.json
+├── digital_edition_complete.json # All results
 ├── humboldt_edition.html       # Interactive scholarly HTML edition
 └── geocode_cache.json
 ```
