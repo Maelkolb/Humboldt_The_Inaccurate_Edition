@@ -14,37 +14,11 @@ The transcription panel offers two synchronised views:
   • **Document view** (default) — every region with a bounding box is
     absolutely positioned inside an aspect-ratio container that mirrors the
     original page geometry. The result is a typeset "ghost" of the
-    facsimile in which placement itself carries information. Region chrome
-    is whisper-thin; the text *is* the design.
+    facsimile in which placement itself carries information.
 
   • **Reading view** — a clean linear flow with marginal notes in a
     three-column layout, anchored to their original y-position.
 
-Other features (all preserved)
-------------------------------
-- Facsimile panel with toggleable bbox overlay, smooth pan/zoom (mouse and
-  trackpad), and click-to-sync highlighting between image and transcription.
-- Two layout modes: Facsimile + Text  /  Text only.
-- Per-page legend (entities & regions) with click-to-toggle visibility.
-- Inline editorial markup:  ~~strikethrough~~ , <u>underline</u> ,
-  word[?] and [?] for uncertain readings.
-- Per-page Leaflet map for geocoded locations.
-- Sliding table-of-contents drawer with entry previews.
-- Search-as-you-type filter across the current page's regions.
-- Copy-as-plain-text per page.
-- Full keyboard navigation (← → arrows, Shift+← / Shift+→ for first/last,
-  T to toggle TOC, R to toggle reading/document mode, F to toggle layout).
-- Print-friendly stylesheet.
-
-The Python API is preserved exactly:
-
-    generate_html_edition(
-        results, output_path,
-        title=..., subtitle=...,
-        entity_colors=..., entity_labels=...,
-        region_colors=..., region_labels=...,
-        image_folder=..., image_ref_prefix=...,
-    )
 """
 
 from __future__ import annotations
