@@ -74,12 +74,12 @@ python scripts/process_journal.py --images images/ --out output/ --embed-images 
 
 # Use higher thinking for difficult pages
 python scripts/process_journal.py --images images/ --out output/ --thinking high --embed-images
-
+```
 
 
 ## Output Files
 
-```bash
+```
 output/
 ├── json/
 │   ├── page_0001.json          # Per-page results (regions, entities, metadata)
