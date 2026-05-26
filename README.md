@@ -72,18 +72,10 @@ python scripts/process_journal.py --images images/ --out output/ --embed-images
 # Process a subset for testing (first 3 pages)
 python scripts/process_journal.py --images images/ --out output/ --embed-images --end 3
 
-# Use higher thinking for very difficult pages
+# Use higher thinking for difficult pages
 python scripts/process_journal.py --images images/ --out output/ --thinking high --embed-images
 
 
-## Configuration
-
-All settings in `src/config.py`:
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `MODEL_ID` | `gemini-3-flash-preview` | Gemini model |
-| `ENTITY_TYPES` | 8 types | Humboldt-specific entity definitions |
 
 ## Output Files
 
