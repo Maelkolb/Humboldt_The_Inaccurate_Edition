@@ -79,7 +79,7 @@ python scripts/process_journal.py --images images/ --out output/ --thinking high
 
 ## Output Files
 
-```
+```bash
 output/
 ├── json/
 │   ├── page_0001.json          # Per-page results (regions, entities, metadata)
