@@ -81,6 +81,10 @@ def main() -> None:
         help="Override model for NER (default: same as --model)",
     )
     parser.add_argument(
+        "--model-ground-truth", default=None,
+        help="Override model for ground-truth matching (default: same as --model)",
+    )
+    parser.add_argument(
         "--thinking", default=config.THINKING_LEVEL,
         choices=["none", "low", "medium", "high"],
         help="Default thinking level (fallback if per-stage not set)",
@@ -94,6 +98,20 @@ def main() -> None:
         "--thinking-transcription", default=config.THINKING_LEVEL_TRANSCRIPTION,
         choices=["none", "low", "medium", "high"],
         help="Thinking level for transcription (default: low)",
+    )
+    parser.add_argument(
+        "--thinking-ground-truth", default="medium",
+        choices=["none", "low", "medium", "high"],
+        help="Thinking level for ground-truth matching (default: medium)",
+    )
+    parser.add_argument(
+        "--ground-truth-tei", default=None, metavar="PATH",
+        help=(
+            "Optional: path to a ground-truth TEI XML file (e.g. from "
+            "edition-humboldt.de). When given, runs an extra step per page "
+            "to match the GT text to the detected regions; the HTML viewer "
+            "then exposes a Gemini / Ground Truth / Diff toggle."
+        ),
     )
     parser.add_argument(
         "--embed-images", action="store_true",
@@ -141,6 +159,10 @@ def main() -> None:
         model_id_transcription=args.model_transcription,
         model_id_consistency=args.model_consistency,
         model_id_ner=args.model_ner,
+        model_id_ground_truth=args.model_ground_truth,
+        thinking_level_ground_truth=args.thinking_ground_truth,
+        ground_truth_tei=args.ground_truth_tei,
+        book_title=args.title,
     )
 
     if results:

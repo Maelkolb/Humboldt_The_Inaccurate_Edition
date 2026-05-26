@@ -26,6 +26,12 @@ from .transcription import transcribe_regions
 from .consistency_check import check_and_fix_regions
 from .ner import perform_ner
 from .geocoding import geocode_entities
+from .ground_truth import (
+    _build_gt_index,
+    _norm_folio,
+    match_ground_truth_to_page,
+)
+from .tei_writer import write_tei_file
 
 logger = logging.getLogger(__name__)
 
@@ -180,16 +186,22 @@ def process_page(
     model_id_transcription: str | None = None,
     model_id_consistency: str | None = None,
     model_id_ner: str | None = None,
+    model_id_ground_truth: str | None = None,
     thinking_level_consistency: str | None = None,
     thinking_level_ner: str | None = None,
+    thinking_level_ground_truth: str | None = None,
+    gt_page: Optional[PageResult] = None,
 ) -> PageResult:
     """Run the full pipeline for one Humboldt journal page.
 
     `model_id` is the default applied to every LLM stage. Optional
     `model_id_layout` / `model_id_transcription` / `model_id_consistency` /
-    `model_id_ner` override the model for that stage only; if any is None,
-    the stage falls back to `model_id`.
+    `model_id_ner` / `model_id_ground_truth` override the model for that
+    stage only; if any is None, the stage falls back to `model_id`.
 
+    When ``gt_page`` is provided (a matching folio from the ground-truth
+    TEI), ground-truth matching is run as Step 5 and each region's
+    ``ground_truth_content`` is populated.
     """
     image_path = Path(image_path)
     folio_label = extract_folio_label(image_path.name)
@@ -200,12 +212,14 @@ def process_page(
     transcription_model = model_id_transcription or model_id
     consistency_model   = model_id_consistency   or model_id
     ner_model           = model_id_ner           or model_id
+    gt_model            = model_id_ground_truth  or model_id
 
     # Resolve per-stage thinking levels
     layout_thinking        = thinking_level_layout        or thinking_level
     transcription_thinking = thinking_level_transcription or thinking_level
     consistency_thinking   = thinking_level_consistency   or "low"   # preserve old default
     ner_thinking           = thinking_level_ner           or thinking_level
+    gt_thinking            = thinking_level_ground_truth  or thinking_level
 
     # Step 1 – Region Detection (high thinking for complex layouts)
     logger.info("  Step 1: Region detection (model: %s, thinking: %s)...",
@@ -219,12 +233,15 @@ def process_page(
     regions = transcribe_regions(client, image_path, detected, transcription_model, transcription_thinking)
     logger.info("  Transcribed %d regions", len(regions))
 
-    # Step 2.5 – Consistency / Deduplication check
+    # Step 2.5 – Consistency / Deduplication check (now multimodal: also
+    # resolves "[?]" uncertain readings by looking at the page image)
     if run_consistency_check:
-        logger.info("  Step 2.5: Consistency check (model: %s, thinking: %s)...",
+        logger.info("  Step 2.5: Consistency check (model: %s, thinking: %s, multimodal)...",
                     consistency_model, consistency_thinking)
         regions, issues = check_and_fix_regions(
-            client, regions, consistency_model, thinking_level=consistency_thinking
+            client, regions, consistency_model,
+            thinking_level=consistency_thinking,
+            image_path=image_path,
         )
         errors   = [i for i in issues if i.get("severity") != "warning"]
         warnings = [i for i in issues if i.get("severity") == "warning"]
@@ -251,6 +268,15 @@ def process_page(
     logger.info("  Step 4: Geocoding...")
     locations = geocode_entities(entities, cache=geo_cache)
     logger.info("  Geocoded %d locations", len(locations))
+
+    # Step 5 (optional) – Ground-truth matching
+    if gt_page is not None:
+        logger.info("  Step 5: Ground-truth matching (model: %s, thinking: %s)...",
+                    gt_model, gt_thinking)
+        regions = match_ground_truth_to_page(
+            client, image_path, regions, gt_page,
+            model_id=gt_model, thinking_level=gt_thinking,
+        )
 
     return PageResult(
         page_number=page_number,
@@ -288,14 +314,25 @@ def process_book(
     model_id_transcription: str | None = None,
     model_id_consistency: str | None = None,
     model_id_ner: str | None = None,
+    model_id_ground_truth: str | None = None,
     thinking_level_consistency: str | None = None,
     thinking_level_ner: str | None = None,
+    thinking_level_ground_truth: str | None = None,
+    ground_truth_tei: str | Path | None = None,
+    book_title: str = "Humboldt – Travel Journal (automated transcription)",
 ) -> List[PageResult]:
     """Process all pages in image_folder through the full pipeline.
 
     `model_id` is the default applied to every LLM stage. Pass any of
     `model_id_layout`, `model_id_transcription`, `model_id_consistency`,
-    `model_id_ner` to override the model for that stage only.
+    `model_id_ner`, `model_id_ground_truth` to override the model for that
+    stage only.
+
+    When ``ground_truth_tei`` is provided, the optional Step 5
+    (ground-truth matching) is enabled: for each page whose folio label
+    appears in the GT TEI, every region gets ``ground_truth_content``
+    populated. The HTML viewer then exposes a Gemini / Ground Truth / Diff
+    toggle on those pages.
     """
     image_folder = Path(image_folder)
     output_folder = Path(output_folder)
@@ -309,13 +346,27 @@ def process_book(
 
     logger.info("Found %d images in %s", len(image_files), image_folder)
     logger.info(
-        "Models — default: %s | layout: %s | transcription: %s | consistency: %s | ner: %s",
+        "Models — default: %s | layout: %s | transcription: %s | consistency: %s | ner: %s | ground_truth: %s",
         model_id,
         model_id_layout        or model_id,
         model_id_transcription or model_id,
         model_id_consistency   or model_id,
         model_id_ner           or model_id,
+        model_id_ground_truth  or model_id,
     )
+
+    # Build GT index once if ground-truth-matching is enabled
+    gt_index: Dict[str, PageResult] = {}
+    if ground_truth_tei:
+        logger.info("Loading ground-truth TEI: %s", ground_truth_tei)
+        try:
+            gt_index = _build_gt_index(ground_truth_tei)
+        except Exception as exc:
+            logger.error(
+                "Failed to load ground-truth TEI (%s) — proceeding without GT.",
+                exc,
+            )
+            gt_index = {}
 
     subset = image_files[start_page:end_page]
     logger.info("Processing %d pages...", len(subset))
@@ -325,6 +376,16 @@ def process_book(
 
     for idx, image_path in enumerate(tqdm(subset, desc="Folios", unit="fol")):
         page_num = extract_page_number(image_path.name) or (idx + 1)
+        # Look up matching GT page (if any) by normalised folio label
+        gt_page = None
+        if gt_index:
+            folio_key = _norm_folio(extract_folio_label(image_path.name))
+            gt_page = gt_index.get(folio_key)
+            if gt_page is None:
+                logger.debug(
+                    "No GT match for folio %r (key=%r)",
+                    image_path.name, folio_key,
+                )
         try:
             result = process_page(
                 client, image_path, page_num, entity_types,
@@ -337,8 +398,11 @@ def process_book(
                 model_id_transcription=model_id_transcription,
                 model_id_consistency=model_id_consistency,
                 model_id_ner=model_id_ner,
+                model_id_ground_truth=model_id_ground_truth,
                 thinking_level_consistency=thinking_level_consistency,
                 thinking_level_ner=thinking_level_ner,
+                thinking_level_ground_truth=thinking_level_ground_truth,
+                gt_page=gt_page,
             )
             results.append(result)
 
@@ -351,10 +415,18 @@ def process_book(
 
     results.sort(key=lambda r: r.page_number)
 
+    # ----- Output: combined JSON -----
     combined_json = output_folder / "digital_edition_complete.json"
     with open(combined_json, "w", encoding="utf-8") as fh:
         json.dump([r.to_dict() for r in results], fh, ensure_ascii=False, indent=2)
     logger.info("Combined JSON saved: %s", combined_json)
+
+    # ----- Output: full-book TEI (standard output file) -----
+    try:
+        tei_path = output_folder / "digital_edition.tei.xml"
+        write_tei_file(results, tei_path, title=book_title)
+    except Exception as exc:
+        logger.error("Failed to write TEI document: %s", exc, exc_info=True)
 
     if geo_cache:
         cache_path = output_folder / "geocode_cache.json"
@@ -362,9 +434,10 @@ def process_book(
             json.dump(geo_cache, fh, ensure_ascii=False, indent=2)
 
     logger.info(
-        "Done. Folios: %d | Entities: %d | Locations: %d",
+        "Done. Folios: %d | Entities: %d | Locations: %d | GT-matched pages: %d",
         len(results),
         sum(len(r.entities) for r in results),
         sum(len(r.locations) for r in results),
+        sum(1 for r in results if r.has_ground_truth),
     )
     return results

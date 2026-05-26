@@ -51,6 +51,9 @@ class Region:
     is_pasted_slip: bool = False   # physical paper slip pasted onto the page
     # TEI source tracking
     tei_id: Optional[str] = None  # xml:id of the source TEI element
+    # Ground-truth comparison (populated only when --ground-truth-tei is used)
+    ground_truth_content: Optional[str] = None       # GT text matched to this region
+    ground_truth_confidence: Optional[float] = None  # 0..1 confidence of the match
 
     def to_dict(self) -> Dict:
         d = {
@@ -82,6 +85,10 @@ class Region:
             d["is_pasted_slip"] = self.is_pasted_slip
         if self.tei_id:
             d["tei_id"] = self.tei_id
+        if self.ground_truth_content is not None:
+            d["ground_truth_content"] = self.ground_truth_content
+        if self.ground_truth_confidence is not None:
+            d["ground_truth_confidence"] = self.ground_truth_confidence
         return d
 
     @classmethod
@@ -103,6 +110,8 @@ class Region:
             writing_layer=d.get("writing_layer"),
             is_pasted_slip=d.get("is_pasted_slip", False),
             tei_id=d.get("tei_id"),
+            ground_truth_content=d.get("ground_truth_content"),
+            ground_truth_confidence=d.get("ground_truth_confidence"),
         )
 
 
@@ -146,6 +155,14 @@ class PageResult:
     model_used: str
     entry_numbers: List[str] = field(default_factory=list)  # e.g. ["50", "51", "52"]
     page_languages: List[str] = field(default_factory=list)  # languages on this page
+
+    @property
+    def has_ground_truth(self) -> bool:
+        """True if at least one region has ground_truth_content populated."""
+        return any(
+            r.ground_truth_content is not None and r.ground_truth_content != ""
+            for r in self.regions
+        )
 
     def to_dict(self) -> Dict:
         return {

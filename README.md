@@ -20,9 +20,12 @@ This pipeline addresses all of these with custom region types, editorial convent
 |------|--------|-------------|
 | 1. Region Detection | `region_detection.py` | Identifies Humboldt-specific regions: entry headings, main text, marginal notes, calculation blocks, observation tables, sketches, crossed-out passages, interlinear additions, bibliographic references, coordinates, instrument lists |
 | 2. Transcription | `transcription.py` | Scholarly diplomatic transcription, tracking languages, noting editorial observations |
+| 2.5. Consistency Check | `consistency_check.py` | **Multimodal QA pass.** Looks at the page image alongside every region and (a) fixes structural problems like duplicate lines, contaminated main-text, language mismatches, and (b) attempts to resolve every word marked `[?]` directly from the ink, dropping the marker only when a confident reading can be supplied. |
 | 3. Entity Annotation | `ner.py` | NER for persons, locations, institutions, instruments, publications, celestial objects, measurements, natural objects |
 | 4. Georeferencing | `geocoding.py` | Location resolution with a historical place-name mapping (Oedenburg→Sopron, Preßburg→Bratislava, etc.) |
-| 5. HTML Edition | `html_generator.py` |digital edition with side-by-side facsimile + transcription, editorial apparatus, entity highlighting, map view |
+| 5. Ground-Truth Matching | `ground_truth.py` | **Optional**, enabled by `--ground-truth-tei PATH`. For each page whose folio appears in an externally-provided ground-truth TEI (e.g. from [edition-humboldt.de](https://edition-humboldt.de/)), every region's matching GT text is attached to the region. The HTML viewer then exposes a **Gemini / Ground Truth / Diff** toggle for that page. |
+| 6. HTML Edition | `html_generator.py` | Self-contained digital edition with side-by-side facsimile + transcription, editorial apparatus, entity highlighting, map view, per-page TEI download |
+| 7. TEI Export | `tei_writer.py` | Always emits `digital_edition.tei.xml` in the output folder, following the same structural conventions as edition-humboldt digital (`<pb>`, `<head>`, `<note place="…">`, `<del rendition="#s">`, `<hi rendition="#u">`, `<unclear>`, `<gap/>`, `<supplied>`, `<fw type="folNum"/"catch">`, …). |
 
 ## Humboldt-Specific Region Types
 
@@ -74,6 +77,13 @@ python scripts/process_journal.py --images images/ --out output/ --embed-images 
 
 # Use higher thinking for difficult pages
 python scripts/process_journal.py --images images/ --out output/ --thinking high --embed-images
+
+# Compare against an existing scholarly transcription
+# (e.g. the corresponding TEI from edition-humboldt.de) — the HTML viewer
+# then gets a per-page Gemini / Ground Truth / Diff toggle.
+python scripts/process_journal.py \
+    --images images/ --out output/ --embed-images \
+    --ground-truth-tei reference/H0017682.xml
 ```
 
 
@@ -82,12 +92,43 @@ python scripts/process_journal.py --images images/ --out output/ --thinking high
 ```
 output/
 ├── json/
-│   ├── page_0001.json          # Per-page results (regions, entities, metadata)
+│   ├── page_0001.json                # Per-page results (regions, entities, metadata)
 │   └── ...
-├── digital_edition_complete.json # All results
-├── humboldt_edition.html       # Interactive scholarly HTML edition
+├── digital_edition_complete.json     # All results
+├── digital_edition.tei.xml           # Full-book TEI XML (always written)
+├── humboldt_edition.html             # Interactive scholarly HTML edition
+│                                     # • side-by-side facsimile + transcription
+│                                     # • per-page "TEI" download button
+│                                     # • Gemini / Ground Truth / Diff toggle
+│                                     #   (only on pages where --ground-truth-tei
+│                                     #    produced a match)
 └── geocode_cache.json
 ```
+
+## TEI XML output
+
+The pipeline always writes a TEI document at `output/digital_edition.tei.xml`
+modelled on edition-humboldt digital's encoding conventions:
+
+| Element | Carries |
+|---|---|
+| `<pb n="2r" facs="…"/>` | Page break per folio |
+| `<fw type="folNum">…</fw>` | Page numbers Humboldt wrote himself |
+| `<fw type="catch">…</fw>` | Catch-phrases |
+| `<div type="diaryEntry"><head>…</head><p>…</p></div>` | Diary entries |
+| `<note hand="#author" place="left|right|mTop|mBottom|opposite">` | Marginal notes |
+| `<note rend="sticked">` | Pasted slips |
+| `<hi rendition="#u">…</hi>` | Underlined text |
+| `<del rendition="#s">…</del>` | Crossed-out text |
+| `<unclear>…</unclear>` | Words the pipeline marked `[?]` |
+| `<supplied>…</supplied>` | Editorial supplies (square brackets in the transcription) |
+| `<gap unit="…" quantity="…" reason="illegible"/>` / `<gap/>` | Illegible passages |
+| `<lb/>` | Line breaks |
+| `<persName ref="…"/>`, `<placeName ref="…"/>`, `<orgName ref="…"/>` | Entities |
+| `<figure><figDesc>…</figDesc></figure>` | Sketches |
+
+The HTML edition's **TEI** button next to the page toolbar downloads the
+same TEI as a single-page self-contained file (`folio_2r.tei.xml`, …).
 
 ## Editorial Conventions
 
@@ -98,6 +139,48 @@ The transcription follows diplomatic conventions:
 - Interlinear additions clearly marked
 - Languages tracked per region (DE/FR/LA/ESP badges)
 - Editorial notes for ink changes, illegible passages, later additions
+
+## Ground-Truth Comparison (optional)
+
+When the pipeline is run with `--ground-truth-tei PATH`, every detected
+region on every page is matched against the corresponding text in the
+provided ground-truth TEI (typically the scholarly transcription published
+on [edition-humboldt.de](https://edition-humboldt.de/)).
+
+For each page where the GT folio is found:
+
+1. A multimodal Gemini call receives the image, the detected bounding
+   boxes + Gemini's own (often noisy) transcription, **and** the full GT
+   text for that folio.
+2. The model returns one matched GT segment per detected region.
+3. Those matches are stored alongside the Gemini transcription on each
+   region — both end up in the JSON, neither overwrites the other.
+
+In the HTML viewer this adds a **source toggle** to the page toolbar:
+
+- **Gemini** — what the pipeline produced (default; identical to the
+  no-GT view).
+- **Ground Truth** — the scholarly transcription from the GT TEI.
+- **Diff** — word-level diff of Gemini vs. ground-truth, with
+  `git diff`-style highlighting: red strikethrough for tokens only in
+  Gemini (misreads, hallucinations), green underline for tokens only in
+  the ground-truth (missed words).
+
+Press **S** to cycle through the three modes from the keyboard.
+
+Pages whose folio label has no match in the GT TEI fall back silently to
+Gemini-only display.
+
+## Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| ← / → | Previous / next page (hold Shift to jump to first / last) |
+| T | Open/close table of contents |
+| R | Toggle Document ↔ Reading transcription mode |
+| F | Toggle layout (full-width facsimile etc.) |
+| B | Toggle region overlay on the facsimile |
+| S | Cycle source mode: Gemini → Ground Truth → Diff (when GT was matched) |
 
 ## License
 

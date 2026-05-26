@@ -24,6 +24,7 @@ The transcription panel offers two synchronised views:
 from __future__ import annotations
 
 import base64
+import difflib
 import html as html_lib
 import io
 import json
@@ -35,6 +36,7 @@ from typing import Dict, List, Optional, Tuple
 from PIL import Image
 
 from .models import Entity, PageResult, Region
+from .tei_writer import page_result_to_tei_document
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +147,96 @@ def _render_plain(text: str) -> str:
     return escaped.replace("\n", "<br>\n")
 
 
+# ---------------------------------------------------------------------------
+# Diff rendering (Gemini transcription vs. ground-truth)
+# ---------------------------------------------------------------------------
+
+_TOKEN_RE = re.compile(r"\w+|\s+|[^\w\s]")
+
+
+def _tokenize(text: str) -> List[str]:
+    """Split text into a list of tokens (words, whitespace, single chars).
+
+    Whitespace is preserved as its own token so diff output keeps original
+    spacing.
+    """
+    if not text:
+        return []
+    return _TOKEN_RE.findall(text)
+
+
+def _render_diff(gemini_text: str, gt_text: str) -> str:
+    """Render a word-level diff between Gemini's transcription and the
+    ground-truth transcription as inline HTML.
+
+    Conventions follow ``git diff`` semantics with the ground-truth treated
+    as the canonical "after" state:
+
+      * Tokens common to both: rendered plain.
+      * Tokens present only in Gemini (i.e. Gemini wrongly added /
+        misread): wrapped in ``<span class="diff-del">…</span>`` with a
+        strike-through.
+      * Tokens present only in the ground-truth (i.e. Gemini missed them):
+        wrapped in ``<span class="diff-ins">…</span>`` with an underline.
+
+    Whitespace differences are smoothed out — only word-level edits show
+    as deletions/insertions.
+    """
+    if not gemini_text and not gt_text:
+        return ""
+    a = _tokenize(gemini_text or "")
+    b = _tokenize(gt_text or "")
+
+    sm = difflib.SequenceMatcher(a=a, b=b, autojunk=False)
+    out: List[str] = []
+
+    def _esc_token(t: str) -> str:
+        # Preserve newlines so multi-line diffs stay readable in HTML
+        return html_lib.escape(t).replace("\n", "<br>\n")
+
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            for tok in a[i1:i2]:
+                out.append(_esc_token(tok))
+        elif tag == "delete":
+            chunk = "".join(_esc_token(t) for t in a[i1:i2])
+            if chunk.strip():
+                out.append(
+                    f'<span class="diff-del" title="Only in Gemini transcription">'
+                    f'{chunk}</span>'
+                )
+            else:
+                out.append(chunk)
+        elif tag == "insert":
+            chunk = "".join(_esc_token(t) for t in b[j1:j2])
+            if chunk.strip():
+                out.append(
+                    f'<span class="diff-ins" title="Only in ground truth">'
+                    f'{chunk}</span>'
+                )
+            else:
+                out.append(chunk)
+        elif tag == "replace":
+            del_chunk = "".join(_esc_token(t) for t in a[i1:i2])
+            ins_chunk = "".join(_esc_token(t) for t in b[j1:j2])
+            if del_chunk.strip():
+                out.append(
+                    f'<span class="diff-del" title="Gemini">{del_chunk}</span>'
+                )
+            if ins_chunk.strip():
+                out.append(
+                    f'<span class="diff-ins" title="Ground truth">{ins_chunk}</span>'
+                )
+    return "".join(out)
+
+
+def _render_gt_plain(text: str) -> str:
+    """Render ground-truth text with the same editorial markup we use for
+    Gemini text (``~~``, ``<u>``, ``[?]``), but without entity highlighting
+    — entities in GT are out-of-scope for the viewer's runtime."""
+    return _render_plain(text or "")
+
+
 _RE_UNDERLINE_CROSS = re.compile(
     r'&lt;u&gt;(.*?)&lt;/u&gt;', re.DOTALL
 )
@@ -201,6 +293,50 @@ def _annotate_text(
     if cur < len(text):
         parts.append(_render_plain(text[cur:]))
     return _postprocess_editorial("".join(parts))
+
+
+def _render_region_text(
+    region: Region,
+    entities: List[Entity],
+    ec: Dict[str, str],
+) -> str:
+    """
+    Render a region's content for inline display in HTML.
+
+    When the region has no ``ground_truth_content``, returns the same
+    annotated HTML as ``_annotate_text(region.content, ...)`` — the
+    existing behaviour, unchanged.
+
+    When ground-truth content IS available, returns a single wrapper
+    ``<span class="region-content has-gt">`` containing three child spans —
+    one per source mode (``gemini`` / ``gt`` / ``diff``). CSS on the
+    enclosing page (``[data-source-mode="…"]``) controls which one is
+    visible.
+    """
+    gemini_html = _annotate_text(region.content, entities, ec)
+
+    gt = region.ground_truth_content
+    if gt is None or gt == "":
+        return gemini_html
+
+    gt_html = _render_gt_plain(gt)
+    diff_html = _render_diff(region.content or "", gt)
+
+    conf = region.ground_truth_confidence
+    conf_attr = ""
+    if conf is not None:
+        try:
+            conf_attr = f' data-gt-confidence="{float(conf):.2f}"'
+        except (TypeError, ValueError):
+            pass
+
+    return (
+        f'<span class="region-content has-gt"{conf_attr}>'
+        f'<span class="rc rc--gemini">{gemini_html}</span>'
+        f'<span class="rc rc--gt">{gt_html}</span>'
+        f'<span class="rc rc--diff">{diff_html}</span>'
+        f'</span>'
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +445,7 @@ def _render_region(
         return f'{open_tag}{meta}{body}{note}{close_tag}'
 
     if rtype == "entry_heading":
-        annotated = _annotate_text(region.content, entities, ec)
+        annotated = _render_region_text(region, entities, ec)
         return (
             f'{open_tag}{meta}<h2 class="r-heading">{annotated}</h2>'
             f'{note}{close_tag}'
@@ -333,7 +469,7 @@ def _render_region(
         return f'{open_tag}{meta}{body}{note}{close_tag}'
 
     if rtype == "crossed_out":
-        annotated = _annotate_text(region.content, entities, ec)
+        annotated = _render_region_text(region, entities, ec)
         repl = (
             f'<div class="r-replacement">'
             f'<span class="r-replacement-label">Replaced by</span>'
@@ -373,14 +509,14 @@ def _render_region(
                 f'<em>[Bleedthrough from opposite folio — not transcribed]</em>'
                 f'</p>{note}{close_tag}'
             )
-        annotated = _annotate_text(region.content, entities, ec)
+        annotated = _render_region_text(region, entities, ec)
         return (
             f'{open_tag}{meta}<p class="r-text">{annotated}</p>'
             f'{note}{close_tag}'
         )
 
     # default: main_text, bibliographic_ref, page_number, catch_phrase, etc.
-    annotated = _annotate_text(region.content, entities, ec)
+    annotated = _render_region_text(region, entities, ec)
     return f'{open_tag}{meta}<p class="r-text">{annotated}</p>{note}{close_tag}'
 
 
@@ -463,7 +599,7 @@ def _doc_inline_content(
         )
 
     if rtype == "crossed_out":
-        annotated = _annotate_text(region.content, entities, ec)
+        annotated = _render_region_text(region, entities, ec)
         repl = ""
         if region.crossed_out_text:
             repl = (
@@ -477,9 +613,9 @@ def _doc_inline_content(
         mp = getattr(region, "marginal_position", None)
         if mp == "opposite":
             return '<em class="doc-faint">[opposite-folio bleedthrough]</em>'
-        return _annotate_text(region.content, entities, ec)
+        return _render_region_text(region, entities, ec)
 
-    return _annotate_text(region.content, entities, ec)
+    return _render_region_text(region, entities, ec)
 
 
 def _build_doc_panel(
@@ -821,6 +957,11 @@ _ICON_PATHS = {
         'stroke="currentColor" stroke-width="1.4"/>'
         '<path d="M6 10h.5M9 10h.5M12 10h.5M6.5 13h7" fill="none" '
         'stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>',
+    "tei":
+        '<path d="M4 3h12v3M4 17h12M10 3v14" fill="none" '
+        'stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>'
+        '<path d="M14 9l3 2-3 2" fill="none" stroke="currentColor" '
+        'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
 }
 
 
@@ -1064,6 +1205,54 @@ def generate_html_edition(
         # ── Tools toolbar ──
         plain_text = _plain_text_from_regions(result.regions)
         plain_text_attr = html_lib.escape(plain_text, quote=True)
+
+        # Per-page TEI document (base64-encoded so the download attr is safe
+        # for any payload; rendered into a hidden data attribute, then the
+        # JS in this page constructs a Blob URL on click).
+        try:
+            page_tei_xml = page_result_to_tei_document(result)
+            page_tei_b64 = base64.b64encode(
+                page_tei_xml.encode("utf-8")
+            ).decode("ascii")
+        except Exception as exc:
+            logger.warning("Could not build per-page TEI for folio %s: %s",
+                           result.folio_label, exc)
+            page_tei_b64 = ""
+
+        tei_btn = ""
+        if page_tei_b64:
+            tei_filename = (
+                f"folio_{result.folio_label or result.page_number}.tei.xml"
+            )
+            tei_btn = (
+                f'<button type="button" class="tool-btn tool-btn--tei" '
+                f'        data-tei-b64="{page_tei_b64}" '
+                f'        data-tei-filename="{html_lib.escape(tei_filename)}" '
+                f'        title="Download this page as TEI XML">'
+                f'  {_icon("tei", 13)}<span class="tool-label">TEI</span>'
+                f'</button>'
+            )
+
+        # Source toggle (Gemini / Ground Truth / Diff) — only when this page
+        # has any ground-truth content populated
+        has_gt = result.has_ground_truth
+        gt_toggle = ""
+        if has_gt:
+            gt_toggle = (
+                '  <div class="source-toggle" role="tablist" '
+                '       aria-label="Transcription source">'
+                '    <button type="button" data-source-mode="gemini" '
+                '            class="active" role="tab" '
+                '            title="Gemini transcription (S)">Gemini</button>'
+                '    <button type="button" data-source-mode="gt" role="tab" '
+                '            title="Ground-truth transcription (S)">'
+                '      Ground Truth</button>'
+                '    <button type="button" data-source-mode="diff" role="tab" '
+                '            title="Diff: Gemini vs. Ground Truth (S)">'
+                '      Diff</button>'
+                '  </div>'
+            )
+
         tools_html = (
             '<div class="page-tools">'
             '  <div class="trans-toggle" role="tablist" '
@@ -1076,8 +1265,10 @@ def generate_html_edition(
             '            title="Linear reading flow (R)">'
             f'      {_icon("reading", 13)}<span>Reading</span></button>'
             '  </div>'
+            f'  {gt_toggle}'
             '  <div class="page-tools-spacer"></div>'
             f'  {map_html}'
+            f'  {tei_btn}'
             '  <button type="button" class="tool-btn tool-btn--copy" '
             f'          data-copy="{plain_text_attr}" '
             f'          title="Copy plain text of this page">'
@@ -1102,8 +1293,17 @@ def generate_html_edition(
 
         cols_cls = "page-cols" if facs_panel else "page-cols is-text-only"
 
+        # The data-source-mode attribute drives the Gemini/GT/Diff CSS
+        # selectors. Starts at "gemini"; JS toggles it when the user clicks
+        # the source toggle.
+        article_attrs = (
+            f'id="page-{idx}" data-page-idx="{idx}" '
+            f'data-source-mode="gemini" '
+            f'data-has-gt="{"true" if has_gt else "false"}"'
+        )
+
         page_divs.append(
-            f'<article class="page" id="page-{idx}" data-page-idx="{idx}">'
+            f'<article class="page" {article_attrs}>'
             '  <header class="page-header">'
             '    <div class="page-header-main">'
             f'      <span class="folio">Fol. '
@@ -1238,7 +1438,7 @@ family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
   <span class="foot-text">Humboldt — The Inaccurate Edition</span>
   <span class="foot-hint">
     {_icon("kbd", 12)}
-    <span>← → navigate · Shift to jump · T toc · R mode · F layout</span>
+    <span>← → navigate · Shift to jump · T toc · R mode · S source · F layout</span>
   </span>
 </footer>
 
@@ -1894,6 +2094,83 @@ body::before{
   background:var(--ink);
   color:var(--paper-light);
   box-shadow:0 1px 2px rgba(27, 36, 64, .2);
+}
+
+/* ── Source toggle (Gemini / Ground Truth / Diff) ────────────────────
+   Same visual language as .trans-toggle so the two toggles sit cleanly
+   side by side. Only emitted on pages where the pipeline ran ground-
+   truth matching and has populated region.ground_truth_content. */
+.source-toggle{
+  display:inline-flex;
+  background:var(--paper-light);
+  border:1px solid var(--rule);
+  border-radius:var(--r-sm);
+  padding:2px;
+  box-shadow:inset 0 1px 0 rgba(255, 255, 255, .4);
+}
+.source-toggle button{
+  display:inline-flex;align-items:center;
+  padding:.32rem .65rem;
+  border-radius:3px;
+  font-family:var(--f-ui);
+  font-size:.74rem;
+  font-weight:500;
+  color:var(--text-mid);
+  transition:background .18s var(--ease), color .18s var(--ease);
+}
+.source-toggle button:hover{color:var(--ink)}
+.source-toggle button.active{
+  background:var(--ink);
+  color:var(--paper-light);
+  box-shadow:0 1px 2px rgba(27, 36, 64, .2);
+}
+
+/* ── Region content variants ────────────────────────────────────────
+   When a region has ground_truth_content, the inline content is wrapped
+   in a <span class="region-content has-gt"> that holds three children —
+   .rc--gemini, .rc--gt, and .rc--diff. The page-level data-source-mode
+   attribute on the enclosing <article class="page"> selects which one
+   is visible at any given moment. */
+.region-content{display:inline}
+.region-content.has-gt{display:contents}
+.region-content.has-gt .rc{display:none}
+.page[data-source-mode="gemini"] .region-content.has-gt .rc--gemini{display:inline}
+.page[data-source-mode="gt"]     .region-content.has-gt .rc--gt{display:inline}
+.page[data-source-mode="diff"]   .region-content.has-gt .rc--diff{display:inline}
+
+/* Subtle confidence-attenuation cue (lower opacity for low-confidence GT) */
+.region-content.has-gt[data-gt-confidence="0.00"] .rc--gt,
+.region-content.has-gt[data-gt-confidence="0.10"] .rc--gt,
+.region-content.has-gt[data-gt-confidence="0.20"] .rc--gt{
+  opacity:.55;
+}
+
+/* ── Word-level diff highlighting ───────────────────────────────────
+   git-style colours: red-tinted strike for tokens only in Gemini,
+   green-tinted underline for tokens only in the ground-truth. We
+   deliberately keep the contrast modest so the diff reads as a
+   scholarly comparison, not a code review. */
+.diff-del{
+  background:rgba(160, 36, 36, .10);
+  color:rgba(160, 36, 36, .95);
+  text-decoration:line-through;
+  text-decoration-color:rgba(160, 36, 36, .55);
+  padding:0 .12em;
+  border-radius:2px;
+}
+.diff-ins{
+  background:rgba(58, 96, 52, .12);
+  color:rgba(46, 76, 41, .98);
+  text-decoration:underline;
+  text-decoration-color:rgba(58, 96, 52, .55);
+  text-underline-offset:2px;
+  padding:0 .12em;
+  border-radius:2px;
+}
+.page[data-source-mode="diff"] .r-text,
+.page[data-source-mode="diff"] .r-heading{
+  /* Slightly looser leading in diff mode — wrapped spans need breathing room */
+  line-height:1.85;
 }
 
 .tool-btn{
@@ -3202,6 +3479,8 @@ _JS = r"""
       else openToc();
     } else if(e.key === 'r' || e.key === 'R'){
       toggleTransMode();
+    } else if(e.key === 's' || e.key === 'S'){
+      toggleSourceMode();
     } else if(e.key === 'f' || e.key === 'F'){
       toggleLayout();
     } else if(e.key === 'b' || e.key === 'B'){
@@ -3793,6 +4072,72 @@ _JS = r"""
       showToast('Copy failed');
     }
     document.body.removeChild(ta);
+  }
+
+  // ============================================================
+  // TEI download (per-page)
+  //   Each .tool-btn--tei carries a base64-encoded TEI document on
+  //   its data-tei-b64 attribute and the filename on data-tei-filename.
+  //   On click we decode → Blob → URL.createObjectURL → trigger
+  //   download. No external resources needed; works offline.
+  // ============================================================
+  document.querySelectorAll('.tool-btn--tei').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var b64 = btn.dataset.teiB64 || '';
+      var name = btn.dataset.teiFilename || 'page.tei.xml';
+      if(!b64){ showToast('No TEI available'); return; }
+      try{
+        var bin = atob(b64);
+        var bytes = new Uint8Array(bin.length);
+        for(var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        var blob = new Blob([bytes], {
+          type: 'application/xml;charset=utf-8'
+        });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(function(){ URL.revokeObjectURL(url); }, 1500);
+        showToast('Downloaded ' + name);
+      } catch(e){
+        showToast('TEI download failed');
+      }
+    });
+  });
+
+  // ============================================================
+  // Source-mode toggle (Gemini / Ground Truth / Diff)
+  //   The active mode is stored as data-source-mode on the page
+  //   <article>; CSS selectors do the actual visibility switching.
+  //   Only present on pages where the pipeline produced GT matches.
+  // ============================================================
+  document.querySelectorAll('.source-toggle button').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var page = btn.closest('.page');
+      if(!page) return;
+      var mode = btn.dataset.sourceMode || 'gemini';
+      page.setAttribute('data-source-mode', mode);
+      page.querySelectorAll('.source-toggle button').forEach(function(b){
+        b.classList.toggle('active', b.dataset.sourceMode === mode);
+      });
+    });
+  });
+
+  // Cycle through gemini → gt → diff → gemini (used by the keyboard
+  // shortcut). Safe-no-ops on pages without GT.
+  function toggleSourceMode(){
+    var page = pages[curPage];
+    if(!page || page.dataset.hasGt !== 'true') return;
+    var order = ['gemini', 'gt', 'diff'];
+    var cur = page.dataset.sourceMode || 'gemini';
+    var nxt = order[(order.indexOf(cur) + 1) % order.length];
+    page.setAttribute('data-source-mode', nxt);
+    page.querySelectorAll('.source-toggle button').forEach(function(b){
+      b.classList.toggle('active', b.dataset.sourceMode === nxt);
+    });
   }
 
   // ============================================================
