@@ -105,31 +105,6 @@ output/
 └── geocode_cache.json
 ```
 
-## TEI XML output
-
-The pipeline always writes a TEI document at `output/digital_edition.tei.xml`
-modelled on edition-humboldt digital's encoding conventions:
-
-| Element | Carries |
-|---|---|
-| `<pb n="2r" facs="…"/>` | Page break per folio |
-| `<fw type="folNum">…</fw>` | Page numbers Humboldt wrote himself |
-| `<fw type="catch">…</fw>` | Catch-phrases |
-| `<div type="diaryEntry"><head>…</head><p>…</p></div>` | Diary entries |
-| `<note hand="#author" place="left|right|mTop|mBottom|opposite">` | Marginal notes |
-| `<note rend="sticked">` | Pasted slips |
-| `<hi rendition="#u">…</hi>` | Underlined text |
-| `<del rendition="#s">…</del>` | Crossed-out text |
-| `<unclear>…</unclear>` | Words the pipeline marked `[?]` |
-| `<supplied>…</supplied>` | Editorial supplies (square brackets in the transcription) |
-| `<gap unit="…" quantity="…" reason="illegible"/>` / `<gap/>` | Illegible passages |
-| `<lb/>` | Line breaks |
-| `<persName ref="…"/>`, `<placeName ref="…"/>`, `<orgName ref="…"/>` | Entities |
-| `<figure><figDesc>…</figDesc></figure>` | Sketches |
-
-The HTML edition's **TEI** button next to the page toolbar downloads the
-same TEI as a single-page self-contained file (`folio_2r.tei.xml`, …).
-
 ## Editorial Conventions
 
 The transcription follows diplomatic conventions:
@@ -156,31 +131,7 @@ For each page where the GT folio is found:
 3. Those matches are stored alongside the Gemini transcription on each
    region — both end up in the JSON, neither overwrites the other.
 
-In the HTML viewer this adds a **source toggle** to the page toolbar:
 
-- **Gemini** — what the pipeline produced (default; identical to the
-  no-GT view).
-- **Ground Truth** — the scholarly transcription from the GT TEI.
-- **Diff** — word-level diff of Gemini vs. ground-truth, with
-  `git diff`-style highlighting: red strikethrough for tokens only in
-  Gemini (misreads, hallucinations), green underline for tokens only in
-  the ground-truth (missed words).
-
-Press **S** to cycle through the three modes from the keyboard.
-
-Pages whose folio label has no match in the GT TEI fall back silently to
-Gemini-only display.
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|---|---|
-| ← / → | Previous / next page (hold Shift to jump to first / last) |
-| T | Open/close table of contents |
-| R | Toggle Document ↔ Reading transcription mode |
-| F | Toggle layout (full-width facsimile etc.) |
-| B | Toggle region overlay on the facsimile |
-| S | Cycle source mode: Gemini → Ground Truth → Diff (when GT was matched) |
 
 ## License
 
