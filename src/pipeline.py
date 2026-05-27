@@ -233,22 +233,23 @@ def process_page(
     regions = transcribe_regions(client, image_path, detected, transcription_model, transcription_thinking)
     logger.info("  Transcribed %d regions", len(regions))
 
-    # Step 2.5 – Consistency / Deduplication check (now multimodal: also
+    # Step 2.5 – Consistency / Deduplication check (multimodal: also
     # resolves "[?]" uncertain readings by looking at the page image)
+    consistency_issues: List[Dict] = []
     if run_consistency_check:
         logger.info("  Step 2.5: Consistency check (model: %s, thinking: %s, multimodal)...",
                     consistency_model, consistency_thinking)
-        regions, issues = check_and_fix_regions(
+        regions, consistency_issues = check_and_fix_regions(
             client, regions, consistency_model,
             thinking_level=consistency_thinking,
             image_path=image_path,
         )
-        errors   = [i for i in issues if i.get("severity") != "warning"]
-        warnings = [i for i in issues if i.get("severity") == "warning"]
-        if issues:
+        errors   = [i for i in consistency_issues if i.get("severity") != "warning"]
+        warnings = [i for i in consistency_issues if i.get("severity") == "warning"]
+        if consistency_issues:
             logger.info(
                 "  Consistency: %d issue(s) found — %d corrected, %d flagged for review.",
-                len(issues), len(errors), len(warnings),
+                len(consistency_issues), len(errors), len(warnings),
             )
         else:
             logger.info("  Consistency: clean.")
@@ -290,6 +291,7 @@ def process_page(
         model_used=model_id,
         entry_numbers=entry_numbers,
         page_languages=page_languages,
+        consistency_issues=consistency_issues,
     )
 
 

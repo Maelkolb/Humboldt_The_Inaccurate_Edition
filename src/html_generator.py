@@ -115,22 +115,35 @@ def _find_entity_spans(text: str, entities: List[Entity]):
     return result
 
 
-def _render_plain(text: str) -> str:
-    """Render plain text with editorial markup applied (no entity layer)."""
-    escaped = html_lib.escape(text)
-    # ~~strikethrough~~ → struck-through span
+def _apply_editorial_markup(escaped: str) -> str:
+    """Convert in-text editorial markers to HTML.
+
+    Operates on an ALREADY-html-escaped string (so ``<u>`` shows up as
+    ``&lt;u&gt;``). All regexes use ``re.DOTALL`` so markers that span
+    multiple lines (an underline that runs across a line break, etc.)
+    still resolve correctly.
+
+    Marker conventions:
+      * ``~~text~~``             → struck-through ``<del>``
+      * ``<u>text</u>``          → underlined ``<span class="ed-underline">``
+      * ``word[?]``              → uncertain reading marker
+      * bare ``[?]``             → uncertain-mark only
+    """
+    # ~~struck~~ → del
     escaped = re.sub(
         r'~~(.+?)~~',
         r'<del class="ed-struck" title="Struck through in original">\1</del>',
-        escaped,
+        escaped, flags=re.DOTALL,
     )
-    # <u>underline</u> → underline span (already escaped → &lt;u&gt;)
+    # <u>...</u> (escaped form) → underline span. DOTALL so the underline
+    # can span multiple lines, which Humboldt's hand frequently does.
     escaped = re.sub(
         r'&lt;u&gt;(.+?)&lt;/u&gt;',
         r'<span class="ed-underline" title="Underlined in original">\1</span>',
-        escaped,
+        escaped, flags=re.DOTALL,
     )
 
+    # [?] uncertain reading
     def _unc(m):
         word = m.group(1)
         if word:
@@ -142,9 +155,32 @@ def _render_plain(text: str) -> str:
             '<span class="ed-uncertain-mark" '
             'title="Uncertain reading">[?]</span>'
         )
-
     escaped = re.sub(r'(\w+)?\[\?\]', _unc, escaped)
+    return escaped
+
+
+def _render_plain(text: str) -> str:
+    """Render plain text with editorial markup applied (no entity layer).
+
+    Used by inline paths — converts newlines to ``<br>``. For ``<pre>``
+    contexts (calculation/observation_table/instrument_list) use
+    :func:`_render_block` instead, which keeps raw newlines.
+    """
+    if not text:
+        return ""
+    escaped = html_lib.escape(text)
+    escaped = _apply_editorial_markup(escaped)
     return escaped.replace("\n", "<br>\n")
+
+
+def _render_block(text: str) -> str:
+    """Like :func:`_render_plain`, but for ``<pre>`` contexts: newlines are
+    preserved literally (the pre block already renders them as line breaks
+    — no ``<br>`` substitution)."""
+    if not text:
+        return ""
+    escaped = html_lib.escape(text)
+    return _apply_editorial_markup(escaped)
 
 
 # ---------------------------------------------------------------------------
@@ -295,15 +331,6 @@ def _annotate_text(
     return _postprocess_editorial("".join(parts))
 
 
-def _has_pre_consistency_diff(region: Region) -> bool:
-    """True when the region has a recorded pre-consistency snapshot that
-    actually differs from the current (post-consistency) content."""
-    raw = region.content_pre_consistency
-    if raw is None:
-        return False
-    return (raw or "") != (region.content or "")
-
-
 def _render_region_text(
     region: Region,
     entities: List[Entity],
@@ -312,62 +339,42 @@ def _render_region_text(
     """
     Render a region's content for inline display in HTML.
 
-    Returns either:
-      * The plain annotated HTML (no wrapper), when neither ground-truth
-        content nor a pre-consistency snapshot needs to be exposed.
-      * A multi-variant wrapper ``<span class="region-content has-variants">``
-        containing one ``<span class="rc rc--…">`` per available source mode
-        (``gemini`` / ``gt`` / ``diff`` / ``raw``). CSS on the enclosing
-        page (``[data-source-mode="…"]``) selects which one is visible.
+    When the region has no ``ground_truth_content``, returns the same
+    annotated HTML as ``_annotate_text(region.content, ...)`` — the
+    existing behaviour, unchanged.
 
-    Variant availability:
-      * ``gemini`` — always present (the corrected, post-consistency text).
-      * ``raw``    — only when ``content_pre_consistency`` differs from
-        ``content`` (i.e. the consistency check actually changed something).
-      * ``gt`` / ``diff`` — only when ``ground_truth_content`` is populated.
+    When ground-truth content IS available, returns a single wrapper
+    ``<span class="region-content has-gt">`` containing three child spans —
+    one per source mode (``gemini`` / ``gt`` / ``diff``). CSS on the
+    enclosing page (``[data-source-mode="…"]``) controls which one is
+    visible.
+
+    (The pre-consistency snapshot — ``region.content_pre_consistency`` —
+    is persisted to the JSON output but is NOT exposed in the HTML
+    viewer; it's available for offline inspection / diffing.)
     """
     gemini_html = _annotate_text(region.content, entities, ec)
 
-    has_gt = bool(region.ground_truth_content)
-    has_raw = _has_pre_consistency_diff(region)
-
-    # Fast path: nothing extra to expose → return the plain annotated HTML
-    if not has_gt and not has_raw:
+    gt = region.ground_truth_content
+    if gt is None or gt == "":
         return gemini_html
 
-    variants: List[str] = [
-        f'<span class="rc rc--gemini">{gemini_html}</span>'
-    ]
-    extra_classes: List[str] = []
-    attrs: List[str] = []
+    gt_html = _render_gt_plain(gt)
+    diff_html = _render_diff(region.content or "", gt)
 
-    if has_raw:
-        raw_html = _annotate_text(
-            region.content_pre_consistency or "", entities, ec,
-        )
-        variants.append(f'<span class="rc rc--raw">{raw_html}</span>')
-        extra_classes.append("has-raw")
+    conf = region.ground_truth_confidence
+    conf_attr = ""
+    if conf is not None:
+        try:
+            conf_attr = f' data-gt-confidence="{float(conf):.2f}"'
+        except (TypeError, ValueError):
+            pass
 
-    if has_gt:
-        gt = region.ground_truth_content or ""
-        gt_html = _render_gt_plain(gt)
-        diff_html = _render_diff(region.content or "", gt)
-        variants.append(f'<span class="rc rc--gt">{gt_html}</span>')
-        variants.append(f'<span class="rc rc--diff">{diff_html}</span>')
-        extra_classes.append("has-gt")
-
-        conf = region.ground_truth_confidence
-        if conf is not None:
-            try:
-                attrs.append(f'data-gt-confidence="{float(conf):.2f}"')
-            except (TypeError, ValueError):
-                pass
-
-    classes = " ".join(["region-content", "has-variants", *extra_classes])
-    attrs_str = (" " + " ".join(attrs)) if attrs else ""
     return (
-        f'<span class="{classes}"{attrs_str}>'
-        f'{"".join(variants)}'
+        f'<span class="region-content has-gt"{conf_attr}>'
+        f'<span class="rc rc--gemini">{gemini_html}</span>'
+        f'<span class="rc rc--gt">{gt_html}</span>'
+        f'<span class="rc rc--diff">{diff_html}</span>'
         f'</span>'
     )
 
@@ -391,14 +398,14 @@ def _render_table_html(td: Dict) -> str:
     rows = "".join(
         "<tr>" + "".join(
             f"<{'th' if ri == 0 else 'td'}>"
-            f"{html_lib.escape(str(c))}"
+            f"{_render_plain(str(c))}"
             f"</{'th' if ri == 0 else 'td'}>"
             for c in row
         ) + "</tr>"
         for ri, row in enumerate(td.get("cells", []))
     )
     cap = (
-        f'<caption>{html_lib.escape(td.get("caption", ""))}</caption>'
+        f'<caption>{_render_plain(td.get("caption", ""))}</caption>'
         if td.get("caption") else ""
     )
     return f'<table class="data-table">{cap}<tbody>{rows}</tbody></table>'
@@ -473,7 +480,7 @@ def _render_region(
         body = (
             f'<p class="r-sketch">'
             f'<span class="r-sketch-mark" aria-hidden="true">✦</span>'
-            f'{html_lib.escape(region.content or "[sketch]")}</p>'
+            f'{_render_plain(region.content or "[sketch]")}</p>'
         )
         return f'{open_tag}{meta}{body}{note}{close_tag}'
 
@@ -492,13 +499,13 @@ def _render_region(
         if cells:
             body = _render_table_html(region.table_data)
         elif region.content:
-            body = f'<pre class="r-data">{html_lib.escape(region.content)}</pre>'
+            body = f'<pre class="r-data">{_render_block(region.content)}</pre>'
         else:
             body = '<p class="r-text r-faint"><em>[Table not parsed]</em></p>'
         return f'{open_tag}{meta}{body}{note}{close_tag}'
 
     if rtype == "calculation":
-        body = f'<pre class="r-data">{html_lib.escape(region.content or "")}</pre>'
+        body = f'<pre class="r-data">{_render_block(region.content or "")}</pre>'
         return f'{open_tag}{meta}{body}{note}{close_tag}'
 
     if rtype == "crossed_out":
@@ -506,7 +513,7 @@ def _render_region(
         repl = (
             f'<div class="r-replacement">'
             f'<span class="r-replacement-label">Replaced by</span>'
-            f'<span>{html_lib.escape(region.crossed_out_text)}</span></div>'
+            f'<span>{_render_plain(region.crossed_out_text)}</span></div>'
             if region.crossed_out_text else ""
         )
         return (
@@ -516,7 +523,7 @@ def _render_region(
 
     if rtype == "coordinates":
         body = (
-            f'<p class="r-coords">{html_lib.escape(region.content or "")}</p>'
+            f'<p class="r-coords">{_render_plain(region.content or "")}</p>'
         )
         return f'{open_tag}{meta}{body}{note}{close_tag}'
 
@@ -528,7 +535,7 @@ def _render_region(
         if cells:
             body = _render_table_html(region.table_data)
         elif region.content:
-            body = f'<pre class="r-data">{html_lib.escape(region.content)}</pre>'
+            body = f'<pre class="r-data">{_render_block(region.content)}</pre>'
         else:
             body = '<p class="r-text r-faint"><em>[List not parsed]</em></p>'
         return f'{open_tag}{meta}{body}{note}{close_tag}'
@@ -608,7 +615,7 @@ def _doc_inline_content(
         return (
             f'<span class="doc-sketch-desc">'
             f'<span class="doc-sketch-mark" aria-hidden="true">✦</span>'
-            f'{html_lib.escape(region.content or "[sketch]")}</span>'
+            f'{_render_plain(region.content or "[sketch]")}</span>'
         )
 
     if rtype in ("observation_table", "instrument_list"):
@@ -619,16 +626,16 @@ def _doc_inline_content(
         if cells:
             return _render_table_html(region.table_data)
         if region.content:
-            return f'<pre class="doc-data">{html_lib.escape(region.content)}</pre>'
+            return f'<pre class="doc-data">{_render_block(region.content)}</pre>'
         return '<em class="doc-faint">[unparsed]</em>'
 
     if rtype == "calculation":
-        return f'<pre class="doc-data">{html_lib.escape(region.content or "")}</pre>'
+        return f'<pre class="doc-data">{_render_block(region.content or "")}</pre>'
 
     if rtype == "coordinates":
         return (
             f'<span class="doc-coords">'
-            f'{html_lib.escape(region.content or "")}</span>'
+            f'{_render_plain(region.content or "")}</span>'
         )
 
     if rtype == "crossed_out":
@@ -638,7 +645,7 @@ def _doc_inline_content(
             repl = (
                 f'<span class="doc-crossed-repl" '
                 f'title="Replaced by">→ '
-                f'{html_lib.escape(region.crossed_out_text)}</span>'
+                f'{_render_plain(region.crossed_out_text)}</span>'
             )
         return f'<span class="doc-crossed">{annotated}</span>{repl}'
 
@@ -1090,7 +1097,7 @@ def generate_html_edition(
                     preview = reg.content[:72].strip().replace("\n", " ")
                     break
         preview_html = (
-            f'<span class="toc-preview">{html_lib.escape(preview)}</span>'
+            f'<span class="toc-preview">{_render_plain(preview)}</span>'
             if preview else ""
         )
         toc_items.append(
@@ -1266,42 +1273,23 @@ def generate_html_edition(
                 f'</button>'
             )
 
-        # Source toggle (Gemini / Raw / Ground Truth / Diff) — only emitted
-        # when there's actually more than one variant to flip between.
-        #   * Raw appears when at least one region on this page had its
-        #     content changed by the consistency check (pre-consistency
-        #     snapshot exists and differs).
-        #   * Ground Truth / Diff appear when ground-truth matching ran.
+        # Source toggle (Gemini / Ground Truth / Diff) — only when this page
+        # has any ground-truth content populated
         has_gt = result.has_ground_truth
-        has_raw = any(_has_pre_consistency_diff(r) for r in result.regions)
         gt_toggle = ""
-        if has_gt or has_raw:
-            buttons = [
-                '    <button type="button" data-source-mode="gemini" '
-                '            class="active" role="tab" '
-                '            title="Gemini (after consistency check) (S)">Gemini</button>'
-            ]
-            if has_raw:
-                buttons.append(
-                    '    <button type="button" data-source-mode="raw" role="tab" '
-                    '            title="Gemini raw transcription (pre-consistency check) (S)">'
-                    '      Raw</button>'
-                )
-            if has_gt:
-                buttons.append(
-                    '    <button type="button" data-source-mode="gt" role="tab" '
-                    '            title="Ground-truth transcription (S)">'
-                    '      Ground Truth</button>'
-                )
-                buttons.append(
-                    '    <button type="button" data-source-mode="diff" role="tab" '
-                    '            title="Diff: Gemini vs. Ground Truth (S)">'
-                    '      Diff</button>'
-                )
+        if has_gt:
             gt_toggle = (
                 '  <div class="source-toggle" role="tablist" '
                 '       aria-label="Transcription source">'
-                + "\n".join(buttons) +
+                '    <button type="button" data-source-mode="gemini" '
+                '            class="active" role="tab" '
+                '            title="Gemini transcription (S)">Gemini</button>'
+                '    <button type="button" data-source-mode="gt" role="tab" '
+                '            title="Ground-truth transcription (S)">'
+                '      Ground Truth</button>'
+                '    <button type="button" data-source-mode="diff" role="tab" '
+                '            title="Diff: Gemini vs. Ground Truth (S)">'
+                '      Diff</button>'
                 '  </div>'
             )
 
@@ -1351,8 +1339,7 @@ def generate_html_edition(
         article_attrs = (
             f'id="page-{idx}" data-page-idx="{idx}" '
             f'data-source-mode="gemini" '
-            f'data-has-gt="{"true" if has_gt else "false"}" '
-            f'data-has-raw="{"true" if has_raw else "false"}"'
+            f'data-has-gt="{"true" if has_gt else "false"}"'
         )
 
         page_divs.append(
@@ -2179,27 +2166,22 @@ body::before{
 }
 
 /* ── Region content variants ────────────────────────────────────────
-   When a region has alternative renderings (ground-truth and/or
-   pre-consistency snapshot), the inline content is wrapped in
-   <span class="region-content has-variants"> that holds one
-   <span class="rc rc--<mode>"> per available variant
-   (gemini / raw / gt / diff). The page-level data-source-mode attribute
-   on the enclosing <article class="page"> selects which one is visible. */
+   When a region has ground_truth_content, the inline content is wrapped
+   in a <span class="region-content has-gt"> that holds three children —
+   .rc--gemini, .rc--gt, and .rc--diff. The page-level data-source-mode
+   attribute on the enclosing <article class="page"> selects which one
+   is visible at any given moment. */
 .region-content{display:inline}
-.region-content.has-variants{display:contents}
-.region-content.has-variants .rc{display:none}
-.page[data-source-mode="gemini"] .region-content.has-variants .rc--gemini{display:inline}
-.page[data-source-mode="raw"]    .region-content.has-variants .rc--raw,
-.page[data-source-mode="raw"]    .region-content.has-variants:not(.has-raw) .rc--gemini{display:inline}
-.page[data-source-mode="gt"]     .region-content.has-variants .rc--gt,
-.page[data-source-mode="gt"]     .region-content.has-variants:not(.has-gt) .rc--gemini{display:inline}
-.page[data-source-mode="diff"]   .region-content.has-variants .rc--diff,
-.page[data-source-mode="diff"]   .region-content.has-variants:not(.has-gt) .rc--gemini{display:inline}
+.region-content.has-gt{display:contents}
+.region-content.has-gt .rc{display:none}
+.page[data-source-mode="gemini"] .region-content.has-gt .rc--gemini{display:inline}
+.page[data-source-mode="gt"]     .region-content.has-gt .rc--gt{display:inline}
+.page[data-source-mode="diff"]   .region-content.has-gt .rc--diff{display:inline}
 
 /* Subtle confidence-attenuation cue (lower opacity for low-confidence GT) */
-.region-content.has-variants[data-gt-confidence="0.00"] .rc--gt,
-.region-content.has-variants[data-gt-confidence="0.10"] .rc--gt,
-.region-content.has-variants[data-gt-confidence="0.20"] .rc--gt{
+.region-content.has-gt[data-gt-confidence="0.00"] .rc--gt,
+.region-content.has-gt[data-gt-confidence="0.10"] .rc--gt,
+.region-content.has-gt[data-gt-confidence="0.20"] .rc--gt{
   opacity:.55;
 }
 
@@ -2671,8 +2653,9 @@ body.view-text .facs-panel{display:none}
   line-height:1.45;
   /* Font sizes multiply by --slot-scale (default 1). A JS auto-fit pass
      sets this per-instance so each slot's text fills its own bbox: large
-     bboxes get scaled up, overflowing content gets scaled down (clamped
-     to a MIN_DOWN_SCALE floor for legibility). */
+     bboxes get scaled up (capped per region type), while content that
+     already fills or overflows its bbox stays at scale 1 — the cascade
+     pass below handles the overflow case without shrinking text. */
   font-size:calc(clamp(.62rem, 0.95cqi, .92rem) * var(--slot-scale, 1));
 }
 .doc-canvas{container-type:inline-size}
@@ -3749,10 +3732,13 @@ _JS = r"""
   //       stay at scale 1, even ones with huge bboxes and tiny text.
   //       Now each instance gets its own scale — capped per region
   //       type so display/data still keep distinct visual weights,
-  //       but large bboxes actually get filled. Slots whose natural
-  //       text already overflows their bbox are scaled DOWN slightly
-  //       (toward MIN_DOWN_SCALE) so the text fits without the
-  //       cascade having to push everything around.
+  //       but large bboxes actually get filled. We deliberately do
+  //       NOT shrink anything below scale 1: if natural content is
+  //       already at or above its bbox, we leave it alone and let
+  //       the cascade handle any vertical overlap. Shrinking text
+  //       below readable sizes (and the cascading consequences of
+  //       doing so on multiple stacked regions) was causing regions
+  //       to be pushed off-canvas.
   //
   //   (3) Cascade-resolve vertical overlaps and write tops back in
   //       *pixels* (not percentages of canvasH). If we wrote them as
@@ -3772,31 +3758,26 @@ _JS = r"""
   //       and stack normally.
   // ============================================================
 
-  // Per-region-type ceiling on the per-instance scale factor. Display
-  // & body text can grow generously to fill large bboxes; data-style
-  // content (tables, formulas) is kept tighter so columns and numerals
-  // stay legible. The ACTUAL scale per instance is the smaller of this
-  // cap and the value that fills its own bbox at SAFETY_FILL.
+  // Per-region-type ceiling on the per-instance scale factor.
+  // Conservative on purpose: aggressive caps caused vertical cascade
+  // pushes that knocked some regions off-canvas. These values give
+  // visibly bigger text in roomy bboxes without ever forcing a region
+  // out of its lane.
   var SCALE_CAP_BY_TYPE = {
-    entry_heading:    2.4,
-    main_text:        2.2,
-    marginal_note:    2.0,
-    coordinates:      1.8,
-    bibliographic_ref:1.8,
-    crossed_out:      1.8,
-    catch_phrase:     2.0,
-    page_number:      2.2,
-    sketch:           1.8,
-    calculation:      1.5,
-    observation_table:1.3,
-    instrument_list:  1.3,
-    pasted_slip:      1.8,
+    entry_heading:    1.9,
+    main_text:        1.6,
+    marginal_note:    1.7,
+    coordinates:      1.6,
+    bibliographic_ref:1.5,
+    crossed_out:      1.6,
+    catch_phrase:     1.9,
+    page_number:      2.0,
+    sketch:           1.5,
+    calculation:      1.3,
+    observation_table:1.2,
+    instrument_list:  1.2,
+    pasted_slip:      1.5,
   };
-
-  // Floor for downscaling when natural content overflows its bbox.
-  // We never shrink below this — better to let a tiny bit overflow
-  // (and trigger the cascade) than to render unreadably small text.
-  var MIN_DOWN_SCALE = 0.78;
 
   function reflowDocCanvas(canvas){
     if(!canvas) return;
@@ -3831,30 +3812,43 @@ _JS = r"""
     });
 
     // ---- Step 2: compute one scale PER INSTANCE -----------------------
-    // Height grows roughly as natural × scale^GROW_EXP (between linear
-    // for single-line content and ~quadratic for wrapping paragraphs).
-    // The scale that fills the bbox is therefore:
+    // For each slot independently, work out how much we can grow its
+    // font so the content visually fills its bbox. Height grows roughly
+    // as natural × scale^GROW_EXP — empirically between linear (single
+    // line) and quadratic (paragraphs that re-wrap into more lines as
+    // characters widen). We use 1.7 which over-estimates growth a touch
+    // and keeps us on the safe side of overflow.
     //
-    //   scale = (bboxH × SAFETY_FILL / natural) ^ (1 / GROW_EXP)
-    //
-    // …capped by SCALE_CAP_BY_TYPE on the upper side and clamped to
-    // MIN_DOWN_SCALE on the lower side.
-    var SAFETY_FILL = 0.92;
-    var GROW_EXP    = 1.5;
+    // Important rules (designed to prevent regions from being pushed
+    // off-canvas, which the more aggressive previous version did):
+    //   * NEVER shrink below scale 1 — we'd rather let big content stay
+    //     readable and trigger the cascade than render it at unreadable
+    //     sizes.
+    //   * If content is already nearly filling its bbox at scale 1
+    //     (natural ≥ 78 % of bboxH), don't grow either — risk of
+    //     overflow is too high.
+    //   * Otherwise scale up to fill SAFETY_FILL × bboxH, capped by
+    //     SCALE_CAP_BY_TYPE.
+    var SAFETY_FILL = 0.88;
+    var GROW_EXP    = 1.7;
 
     measurements.forEach(function(m){
-      // Bbox too small or content too thin to measure — leave at scale 1.
       if(m.bboxH < 8 || m.natural < 1){
         m.slot.style.setProperty('--slot-scale', '1');
         return;
       }
-      var cap = SCALE_CAP_BY_TYPE[m.type] || 1.8;
+      // Already filling its bbox? Leave alone.
+      if(m.natural >= m.bboxH * 0.78){
+        m.slot.style.setProperty('--slot-scale', '1');
+        return;
+      }
+      var cap = SCALE_CAP_BY_TYPE[m.type] || 1.5;
       var fillScale = Math.pow(
         m.bboxH * SAFETY_FILL / m.natural,
         1 / GROW_EXP,
       );
-      // Clamp into [MIN_DOWN_SCALE .. cap]
-      var scale = Math.min(cap, Math.max(MIN_DOWN_SCALE, fillScale));
+      // Clamp into [1.0 .. cap] — never go below 1.
+      var scale = Math.min(cap, Math.max(1.0, fillScale));
       m.slot.style.setProperty('--slot-scale', scale.toFixed(3));
     });
 
@@ -4182,21 +4176,14 @@ _JS = r"""
     });
   });
 
-  // Cycle through whatever variants are available on this page:
-  //   gemini → raw? → gt? → diff? → gemini   (used by the keyboard shortcut)
-  // Safe-no-op on pages with no alternative variants.
+  // Cycle through gemini → gt → diff → gemini (used by the keyboard
+  // shortcut). Safe-no-ops on pages without GT.
   function toggleSourceMode(){
     var page = pages[curPage];
-    if(!page) return;
-    var hasGt  = page.dataset.hasGt  === 'true';
-    var hasRaw = page.dataset.hasRaw === 'true';
-    if(!hasGt && !hasRaw) return;
-    var order = ['gemini'];
-    if(hasRaw) order.push('raw');
-    if(hasGt) { order.push('gt'); order.push('diff'); }
+    if(!page || page.dataset.hasGt !== 'true') return;
+    var order = ['gemini', 'gt', 'diff'];
     var cur = page.dataset.sourceMode || 'gemini';
-    var idx = order.indexOf(cur);
-    var nxt = order[(idx + 1) % order.length];
+    var nxt = order[(order.indexOf(cur) + 1) % order.length];
     page.setAttribute('data-source-mode', nxt);
     page.querySelectorAll('.source-toggle button').forEach(function(b){
       b.classList.toggle('active', b.dataset.sourceMode === nxt);

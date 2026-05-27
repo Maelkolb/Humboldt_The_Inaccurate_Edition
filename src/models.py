@@ -166,6 +166,13 @@ class PageResult:
     model_used: str
     entry_numbers: List[str] = field(default_factory=list)  # e.g. ["50", "51", "52"]
     page_languages: List[str] = field(default_factory=list)  # languages on this page
+    # Consistency check report (Step 2.5). Populated whenever the consistency
+    # check ran on this page. Each entry has the LLM's original shape:
+    #   {"issue_type": "...", "region_indices": [...],
+    #    "description": "...", "severity": "error"|"warning"}
+    # Together with each Region's ``content_pre_consistency`` snapshot, this
+    # makes the QA pass fully auditable from the JSON output.
+    consistency_issues: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def has_ground_truth(self) -> bool:
@@ -176,7 +183,7 @@ class PageResult:
         )
 
     def to_dict(self) -> Dict:
-        return {
+        d = {
             "page_number": self.page_number,
             "image_filename": self.image_filename,
             "folio_label": self.folio_label,
@@ -189,6 +196,9 @@ class PageResult:
             "entry_numbers": self.entry_numbers,
             "page_languages": self.page_languages,
         }
+        if self.consistency_issues:
+            d["consistency_issues"] = self.consistency_issues
+        return d
 
     @classmethod
     def from_dict(cls, d: Dict) -> "PageResult":
@@ -229,4 +239,5 @@ class PageResult:
             model_used=d.get("model_used", ""),
             entry_numbers=d.get("entry_numbers", []),
             page_languages=d.get("page_languages", []),
+            consistency_issues=d.get("consistency_issues", []),
         )
