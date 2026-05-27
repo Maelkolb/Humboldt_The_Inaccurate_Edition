@@ -3,11 +3,18 @@
 CLI: Run the Humboldt Journal digitization pipeline.
 
 Pipeline steps:
-  1. Region Detection (Gemini) – Humboldt-specific region types
-  2. Transcription – Kurrentschrift + multilingual scholarly transcription
-  3. Entity Annotation (NER) – scientific/geographic entities
-  4. Georeferencing (Nominatim) – with historical name mapping
-  5. HTML Digital Edition – scholarly side-by-side facsimile + transcription
+  1.   Region Detection (Gemini) – Humboldt-specific region types
+  2.   Transcription – Kurrentschrift + multilingual scholarly transcription
+  2.5  Consistency Check (multimodal) – fixes duplicates / contamination /
+       language mismatches and attempts to resolve [?] uncertain readings
+       directly from the page image. Both the pre- and post-check Gemini
+       transcriptions are persisted per region.
+  3.   Entity Annotation (NER) – scientific/geographic entities
+  4.   Georeferencing (Nominatim) – with historical name mapping
+  5.   Ground-Truth Matching (optional, --ground-truth-tei) – attaches
+       scholarly transcription text to each detected region
+  6.   HTML Digital Edition – scholarly side-by-side facsimile + transcription
+  7.   TEI XML Export – always written as digital_edition.tei.xml
 
 Usage:
     python scripts/process_journal.py --images images/ --out output/
@@ -100,9 +107,23 @@ def main() -> None:
         help="Thinking level for transcription (default: low)",
     )
     parser.add_argument(
+        "--thinking-consistency", default=None,
+        choices=["none", "low", "medium", "high"],
+        help="Thinking level for consistency check (default: low)",
+    )
+    parser.add_argument(
+        "--thinking-ner", default=None,
+        choices=["none", "low", "medium", "high"],
+        help="Thinking level for NER (default: same as --thinking)",
+    )
+    parser.add_argument(
         "--thinking-ground-truth", default="medium",
         choices=["none", "low", "medium", "high"],
         help="Thinking level for ground-truth matching (default: medium)",
+    )
+    parser.add_argument(
+        "--no-consistency", action="store_true",
+        help="Skip Step 2.5 (the multimodal consistency check).",
     )
     parser.add_argument(
         "--ground-truth-tei", default=None, metavar="PATH",
@@ -153,6 +174,7 @@ def main() -> None:
         thinking_level=args.thinking,
         thinking_level_layout=args.thinking_layout,
         thinking_level_transcription=args.thinking_transcription,
+        run_consistency_check=not args.no_consistency,
         start_page=args.start,
         end_page=args.end,
         model_id_layout=args.model_layout,
@@ -160,6 +182,8 @@ def main() -> None:
         model_id_consistency=args.model_consistency,
         model_id_ner=args.model_ner,
         model_id_ground_truth=args.model_ground_truth,
+        thinking_level_consistency=args.thinking_consistency,
+        thinking_level_ner=args.thinking_ner,
         thinking_level_ground_truth=args.thinking_ground_truth,
         ground_truth_tei=args.ground_truth_tei,
         book_title=args.title,

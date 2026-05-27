@@ -54,6 +54,11 @@ class Region:
     # Ground-truth comparison (populated only when --ground-truth-tei is used)
     ground_truth_content: Optional[str] = None       # GT text matched to this region
     ground_truth_confidence: Optional[float] = None  # 0..1 confidence of the match
+    # Pre-consistency-check snapshots (populated only when the consistency
+    # check runs). These let us inspect/compare what Gemini transcribed
+    # BEFORE the consistency QA pass touched it.
+    content_pre_consistency: Optional[str] = None
+    uncertain_readings_pre_consistency: Optional[List[str]] = None
 
     def to_dict(self) -> Dict:
         d = {
@@ -89,6 +94,10 @@ class Region:
             d["ground_truth_content"] = self.ground_truth_content
         if self.ground_truth_confidence is not None:
             d["ground_truth_confidence"] = self.ground_truth_confidence
+        if self.content_pre_consistency is not None:
+            d["content_pre_consistency"] = self.content_pre_consistency
+        if self.uncertain_readings_pre_consistency is not None:
+            d["uncertain_readings_pre_consistency"] = self.uncertain_readings_pre_consistency
         return d
 
     @classmethod
@@ -112,6 +121,8 @@ class Region:
             tei_id=d.get("tei_id"),
             ground_truth_content=d.get("ground_truth_content"),
             ground_truth_confidence=d.get("ground_truth_confidence"),
+            content_pre_consistency=d.get("content_pre_consistency"),
+            uncertain_readings_pre_consistency=d.get("uncertain_readings_pre_consistency"),
         )
 
 

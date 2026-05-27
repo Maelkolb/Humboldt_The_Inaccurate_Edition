@@ -302,6 +302,20 @@ def check_and_fix_regions(
     if not regions:
         return regions, []
 
+    # ----- Snapshot pre-consistency state for EVERY region -----
+    # This runs before any prompt/LLM work, so even if the LLM call fails or
+    # finds no issues, every region's pre-consistency fields are set to the
+    # exact content Gemini produced in Step 2. Downstream code (HTML viewer,
+    # JSON inspection) can then compare "what Gemini said" vs. "what survived
+    # the QA pass" for every region, regardless of whether it was modified.
+    for r in regions:
+        # Only overwrite if not already set (defensive: idempotent if the
+        # consistency check is somehow run twice on the same regions).
+        if r.content_pre_consistency is None:
+            r.content_pre_consistency = r.content
+        if r.uncertain_readings_pre_consistency is None:
+            r.uncertain_readings_pre_consistency = list(r.uncertain_readings or [])
+
     # ----- Serialize regions for the prompt -----
     serialized = [
         {

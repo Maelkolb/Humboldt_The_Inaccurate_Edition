@@ -28,8 +28,14 @@ Supported TEI elements:
     <subst>         substitution (del + add)
     <unclear>       uncertain reading    →  text[?]
     <gap>           lacuna              →  [...]
-    <supplied>      editorial supply    →  [text]
-    <choice>        orig/reg or abbr/expan
+    <supplied>      editorial supply    →  [...]  (content dropped on
+                                                   purpose — keeps only the
+                                                   gap marker so the GT text
+                                                   never includes characters
+                                                   that weren't actually on
+                                                   the page)
+    <choice>        orig/reg → orig (original spelling),
+                    abbr/expan → abbr (abbreviation as written)
     <lb/>           line break          →  \\n
     <persName>      named person entity
     <placeName>     named place entity
@@ -84,9 +90,11 @@ def _extract_text(elem, skip_notes: bool = True) -> str:
       - <del> → ~~text~~
       - <unclear> → text[?]
       - <gap> → [...]
-      - <supplied> → [text]
-      - <choice><orig>/<reg> → reg (preferred)
-      - <lb/> → \\n
+      - <supplied> → [...]  (editor's conjecture is omitted; only the gap
+                             marker is kept, so we never leak text that
+                             wasn't actually written on the page)
+      - <choice><orig>/<reg> → orig (what's actually written in the original)
+      - <choice><abbr>/<expan> → abbr (the abbreviation as written, NOT expanded)
       - <note> → skipped if skip_notes=True
       - <figure> → skipped
       - <metamark>, <anchor>, <fw>, <pb> → skipped (ignored completely)
@@ -181,25 +189,34 @@ def _extract_text(elem, skip_notes: bool = True) -> str:
             return
 
         if local == "supplied":
-            text = _get_all_text(node)
-            parts.append(f"[{text}]")
+            # <supplied> is the editor's conjectural restoration of text
+            # that's lost or illegible in the original. Per the user's
+            # rule "only what is actually written", we do NOT include the
+            # editor's reconstruction — we mark the position with a gap
+            # marker so the surrounding text still makes sense.
+            parts.append("[...]")
             if node.tail:
                 parts.append(node.tail)
             return
 
         if local == "choice":
-            reg = node.find(f"{TEI}reg")
+            # Prefer ORIGINAL-as-written over editorial normalisation:
+            #   <choice><orig>/<reg>     → orig (original spelling)
+            #   <choice><abbr>/<expan>   → abbr (abbreviation as written)
+            # This keeps the ground-truth text faithful to what Humboldt
+            # actually wrote on the page, not the editor's expansion.
             orig = node.find(f"{TEI}orig")
-            expan = node.find(f"{TEI}expan")
             abbr = node.find(f"{TEI}abbr")
-            if reg is not None:
-                parts.append(_get_all_text(reg))
-            elif expan is not None:
-                parts.append(_get_all_text(expan))
-            elif orig is not None:
+            reg = node.find(f"{TEI}reg")
+            expan = node.find(f"{TEI}expan")
+            if orig is not None:
                 parts.append(_get_all_text(orig))
             elif abbr is not None:
                 parts.append(_get_all_text(abbr))
+            elif reg is not None:
+                parts.append(_get_all_text(reg))
+            elif expan is not None:
+                parts.append(_get_all_text(expan))
             if node.tail:
                 parts.append(node.tail)
             return
@@ -410,25 +427,30 @@ class _PageCollector:
             return
 
         if local == "supplied":
-            text = _get_all_text(elem)
-            self._push(f"[{text}]")
+            # See _extract_text — editor's conjectural restoration is
+            # replaced with a gap marker.
+            self._push("[...]")
             if elem.tail:
                 self._push(elem.tail)
             return
 
         if local == "choice":
-            reg = elem.find(f"{TEI}reg")
+            # Prefer ORIGINAL-as-written over editorial normalisation:
+            #   <choice><orig>/<reg>     → orig
+            #   <choice><abbr>/<expan>   → abbr
+            # See _extract_text for rationale.
             orig = elem.find(f"{TEI}orig")
-            expan = elem.find(f"{TEI}expan")
             abbr = elem.find(f"{TEI}abbr")
-            if reg is not None:
-                self._push(_get_all_text(reg))
-            elif expan is not None:
-                self._push(_get_all_text(expan))
-            elif orig is not None:
+            reg = elem.find(f"{TEI}reg")
+            expan = elem.find(f"{TEI}expan")
+            if orig is not None:
                 self._push(_get_all_text(orig))
             elif abbr is not None:
                 self._push(_get_all_text(abbr))
+            elif reg is not None:
+                self._push(_get_all_text(reg))
+            elif expan is not None:
+                self._push(_get_all_text(expan))
             if elem.tail:
                 self._push(elem.tail)
             return

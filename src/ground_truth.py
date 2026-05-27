@@ -146,7 +146,8 @@ You are given:
   1. The page image (attached).
   2. A list of detected regions — each with a bounding box (in 0..1000
      coordinates, [y_min, x_min, y_max, x_max]), a region type, and the
-     pipeline's own (often inaccurate) transcription.
+     pipeline's own (often inaccurate) transcription, which already follows
+     the original line breaks of the manuscript.
   3. The full ground-truth text for THIS page, broken into labelled blocks
      (page_number, main text, marginal_note place=…, pasted_slip, sketch).
 
@@ -181,6 +182,37 @@ Rules for matching:
   * If the GT contains text not covered by any detected region, that's OK —
     do not invent a region for it.
 
+TEXT FIDELITY RULES (IMPORTANT)
+-------------------------------
+
+The ground-truth text you produce must contain ONLY what is actually written
+on the page — no editorial additions:
+
+  * Use the original spellings and abbreviations exactly as written.
+    NEVER substitute expanded forms of abbreviations (e.g. keep "St.",
+    "z.B.", "Hr." — do NOT write "Sankt", "zum Beispiel", "Herr").
+  * Do NOT modernise spellings.
+  * Keep editorial markers that were already produced upstream
+    (``[?]`` for uncertain words, ``[...]`` for gaps, ``~~text~~`` for
+    struck-through text, ``<u>text</u>`` for underlines). These mark
+    things visible on the page; don't strip them.
+  * Do NOT add any commentary, footnote references, or square-bracket
+    editorial supply that isn't already in the input GT text.
+  * If the input GT text for a segment contains an expanded abbreviation
+    that you can see was abbreviated in the manuscript image, replace it
+    with the abbreviated form as it actually appears on the page.
+
+LINE-BREAK FORMATTING
+---------------------
+
+Format each matched GT segment so its line breaks (``\\n``) match the line
+breaks the manuscript shows in that region — i.e., word-by-word, line-by-line,
+just like the pipeline's own transcription does. Use the image as the
+authority for where line breaks fall. The input GT text already contains
+newlines from its TEI ``<lb/>`` markers; honour those, but feel free to
+correct them when the image clearly shows a different lineation than what
+the GT TEI encoded.
+
 OUTPUT FORMAT
 -------------
 
@@ -190,15 +222,14 @@ as the input list):
 [
   {{
     "region_index": 0,
-    "ground_truth_content": "the GT text matched to this region (verbatim
-                              from the GT, preserving its line breaks)",
+    "ground_truth_content": "the GT text matched to this region, with line
+                              breaks aligned to the original manuscript",
     "confidence": 0.95
   }},
   ...
 ]
 
-Preserve the GT text verbatim — including its internal newlines, but
-without the "[main_text]"/"[marginal_note …]" labels.
+Output the GT text WITHOUT the "[main_text]"/"[marginal_note …]" labels.
 
 DETECTED REGIONS (JSON):
 {regions_json}
