@@ -152,9 +152,18 @@ def _canonical_gt_text(gt_page: PageResult) -> str:
 
 
 def _normalize_with_map(s: str) -> Tuple[str, List[int]]:
-    """Collapse whitespace runs to a single space and return the normalised
-    string plus a map from each normalised-char index back to its original
-    index in *s* (so a matched span can be sliced verbatim from the source)."""
+    """Return a comparison string plus an index map back to *s*.
+
+    The comparison string is whitespace-collapsed (runs → single space) AND
+    casefolded, so matching is case- and layout-insensitive. ``idx_map[i]`` is
+    the index in *s* that comparison-char ``i`` came from — letting a matched
+    span be sliced verbatim from the original.
+
+    Casefolding can change a character's length (e.g. German ``ß`` → ``ss``),
+    so a single source char may map to several comparison chars; each of them
+    points back to that one source index. Building the map here (rather than
+    casefolding afterwards) keeps positions and the map exactly aligned.
+    """
     chars: List[str] = []
     idx_map: List[int] = []
     prev_ws = False
@@ -166,8 +175,9 @@ def _normalize_with_map(s: str) -> Tuple[str, List[int]]:
             idx_map.append(i)
             prev_ws = True
         else:
-            chars.append(ch)
-            idx_map.append(i)
+            for fc in ch.casefold():
+                chars.append(fc)
+                idx_map.append(i)
             prev_ws = False
     return "".join(chars), idx_map
 
@@ -190,19 +200,18 @@ def _snap_to_canonical(
     if not cand or not canonical:
         return None
 
-    cn, _ = _normalize_with_map(cand)
-    norm, idx = _normalize_with_map(canonical)
-    if not cn or not norm:
+    cn_cmp, _ = _normalize_with_map(cand)        # casefolded candidate
+    norm_cmp, idx = _normalize_with_map(canonical)  # casefolded canonical + map
+    if not cn_cmp or not norm_cmp:
         return None
 
-    cn_cmp = cn.casefold()
-    norm_cmp = norm.casefold()
+    last = len(idx) - 1
 
     # 1) Exact (whitespace/case-insensitive) substring → slice verbatim.
     pos = norm_cmp.find(cn_cmp)
     if pos >= 0:
         start = idx[pos]
-        end = idx[pos + len(cn) - 1] + 1
+        end = idx[min(pos + len(cn_cmp) - 1, last)] + 1
         return canonical[start:end].strip()
 
     # 2) Fuzzy: span from the first to the last matching block, accepted
@@ -217,7 +226,7 @@ def _snap_to_canonical(
     if difflib.SequenceMatcher(a=span_cmp, b=cn_cmp).ratio() < min_ratio:
         return None
     start = idx[a_start]
-    end = idx[min(a_end, len(idx)) - 1] + 1
+    end = idx[min(a_end - 1, last)] + 1
     return canonical[start:end].strip()
 
 
@@ -435,7 +444,12 @@ def match_ground_truth_to_page(
     for r in regions:
         if r.region_index in match_map:
             raw_gt, conf = match_map[r.region_index]
-            snapped = _snap_to_canonical(raw_gt, canonical_gt) if raw_gt else None
+            try:
+                snapped = _snap_to_canonical(raw_gt, canonical_gt) if raw_gt else None
+            except Exception as exc:  # never let GT matching abort a page
+                logger.warning("  GT snap failed for region %s: %s",
+                               r.region_index, exc)
+                snapped = None
             if snapped:
                 out.append(dataclasses.replace(
                     r,
