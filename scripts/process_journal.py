@@ -11,6 +11,8 @@ Pipeline steps:
        transcriptions are persisted per region.
   3.   Entity Annotation (NER) – scientific/geographic entities
   4.   Georeferencing (Nominatim) – with historical name mapping
+  4.5  Geolocation Validation (text-based) – drops geocoding results that
+       are implausible for the page context / Humboldt's itinerary
   5.   Ground-Truth Matching (optional, --ground-truth-tei) – attaches
        scholarly transcription text to each detected region
   6.   HTML Digital Edition – scholarly side-by-side facsimile + transcription
@@ -88,6 +90,10 @@ def main() -> None:
         help="Override model for NER (default: same as --model)",
     )
     parser.add_argument(
+        "--model-geo-validation", default=config.MODEL_ID_GEO_VALIDATION,
+        help="Override model for geolocation validation (default: same as --model)",
+    )
+    parser.add_argument(
         "--model-ground-truth", default=None,
         help="Override model for ground-truth matching (default: same as --model)",
     )
@@ -117,6 +123,11 @@ def main() -> None:
         help="Thinking level for NER (default: same as --thinking)",
     )
     parser.add_argument(
+        "--thinking-geo-validation", default=None,
+        choices=["none", "low", "medium", "high"],
+        help="Thinking level for geolocation validation (default: low)",
+    )
+    parser.add_argument(
         "--thinking-ground-truth", default="medium",
         choices=["none", "low", "medium", "high"],
         help="Thinking level for ground-truth matching (default: medium)",
@@ -124,6 +135,10 @@ def main() -> None:
     parser.add_argument(
         "--no-consistency", action="store_true",
         help="Skip Step 2.5 (the multimodal consistency check).",
+    )
+    parser.add_argument(
+        "--no-geo-validation", action="store_true",
+        help="Skip Step 4.5 (the text-based geolocation validation).",
     )
     parser.add_argument(
         "--ground-truth-tei", default=None, metavar="PATH",
@@ -177,14 +192,17 @@ def main() -> None:
         run_consistency_check=not args.no_consistency,
         start_page=args.start,
         end_page=args.end,
+        run_geo_validation=not args.no_geo_validation,
         model_id_layout=args.model_layout,
         model_id_transcription=args.model_transcription,
         model_id_consistency=args.model_consistency,
         model_id_ner=args.model_ner,
         model_id_ground_truth=args.model_ground_truth,
+        model_id_geo_validation=args.model_geo_validation,
         thinking_level_consistency=args.thinking_consistency,
         thinking_level_ner=args.thinking_ner,
         thinking_level_ground_truth=args.thinking_ground_truth,
+        thinking_level_geo_validation=args.thinking_geo_validation,
         ground_truth_tei=args.ground_truth_tei,
         book_title=args.title,
     )

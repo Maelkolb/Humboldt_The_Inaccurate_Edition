@@ -26,6 +26,7 @@ from .transcription import transcribe_regions
 from .consistency_check import check_and_fix_regions
 from .ner import perform_ner
 from .geocoding import geocode_entities
+from .geo_consistency import validate_locations
 from .ground_truth import (
     _build_gt_index,
     _norm_folio,
@@ -181,15 +182,18 @@ def process_page(
     thinking_level_transcription: str | None = None,
     run_consistency_check: bool = True,
     geo_cache: Optional[Dict] = None,
+    run_geo_validation: bool = True,
     *,
     model_id_layout: str | None = None,
     model_id_transcription: str | None = None,
     model_id_consistency: str | None = None,
     model_id_ner: str | None = None,
     model_id_ground_truth: str | None = None,
+    model_id_geo_validation: str | None = None,
     thinking_level_consistency: str | None = None,
     thinking_level_ner: str | None = None,
     thinking_level_ground_truth: str | None = None,
+    thinking_level_geo_validation: str | None = None,
     gt_page: Optional[PageResult] = None,
 ) -> PageResult:
     """Run the full pipeline for one Humboldt journal page.
@@ -213,6 +217,7 @@ def process_page(
     consistency_model   = model_id_consistency   or model_id
     ner_model           = model_id_ner           or model_id
     gt_model            = model_id_ground_truth  or model_id
+    geo_val_model       = model_id_geo_validation or model_id
 
     # Resolve per-stage thinking levels
     layout_thinking        = thinking_level_layout        or thinking_level
@@ -220,6 +225,7 @@ def process_page(
     consistency_thinking   = thinking_level_consistency   or "low"   # preserve old default
     ner_thinking           = thinking_level_ner           or thinking_level
     gt_thinking            = thinking_level_ground_truth  or thinking_level
+    geo_val_thinking       = thinking_level_geo_validation or "low"
 
     # Step 1 – Region Detection (high thinking for complex layouts)
     logger.info("  Step 1: Region detection (model: %s, thinking: %s)...",
@@ -270,6 +276,17 @@ def process_page(
     locations = geocode_entities(entities, cache=geo_cache)
     logger.info("  Geocoded %d locations", len(locations))
 
+    # Step 4.5 – Geolocation consistency check (text-based): drop geocoding
+    # results that make no sense for the page's context / Humboldt's itinerary.
+    geo_validation: List[Dict] = []
+    if run_geo_validation and locations:
+        logger.info("  Step 4.5: Geo-validation (model: %s, thinking: %s)...",
+                    geo_val_model, geo_val_thinking)
+        locations, geo_validation = validate_locations(
+            client, locations, entities, full_text,
+            model_id=geo_val_model, thinking_level=geo_val_thinking,
+        )
+
     # Step 5 (optional) – Ground-truth matching
     if gt_page is not None:
         logger.info("  Step 5: Ground-truth matching (model: %s, thinking: %s)...",
@@ -292,6 +309,7 @@ def process_page(
         entry_numbers=entry_numbers,
         page_languages=page_languages,
         consistency_issues=consistency_issues,
+        geo_validation=geo_validation,
     )
 
 
@@ -311,15 +329,18 @@ def process_book(
     run_consistency_check: bool = True,
     start_page: Optional[int] = None,
     end_page: Optional[int] = None,
+    run_geo_validation: bool = True,
     *,
     model_id_layout: str | None = None,
     model_id_transcription: str | None = None,
     model_id_consistency: str | None = None,
     model_id_ner: str | None = None,
     model_id_ground_truth: str | None = None,
+    model_id_geo_validation: str | None = None,
     thinking_level_consistency: str | None = None,
     thinking_level_ner: str | None = None,
     thinking_level_ground_truth: str | None = None,
+    thinking_level_geo_validation: str | None = None,
     ground_truth_tei: str | Path | None = None,
     book_title: str = "Humboldt – Travel Journal (automated transcription)",
 ) -> List[PageResult]:
@@ -396,14 +417,17 @@ def process_book(
                 thinking_level_transcription=thinking_level_transcription,
                 run_consistency_check=run_consistency_check,
                 geo_cache=geo_cache,
+                run_geo_validation=run_geo_validation,
                 model_id_layout=model_id_layout,
                 model_id_transcription=model_id_transcription,
                 model_id_consistency=model_id_consistency,
                 model_id_ner=model_id_ner,
                 model_id_ground_truth=model_id_ground_truth,
+                model_id_geo_validation=model_id_geo_validation,
                 thinking_level_consistency=thinking_level_consistency,
                 thinking_level_ner=thinking_level_ner,
                 thinking_level_ground_truth=thinking_level_ground_truth,
+                thinking_level_geo_validation=thinking_level_geo_validation,
                 gt_page=gt_page,
             )
             results.append(result)

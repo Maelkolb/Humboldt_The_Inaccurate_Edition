@@ -28,6 +28,7 @@ MODEL_ID_LAYOUT:        str | None = os.environ.get("MODEL_ID_LAYOUT")        or
 MODEL_ID_TRANSCRIPTION: str | None = os.environ.get("MODEL_ID_TRANSCRIPTION") or None
 MODEL_ID_CONSISTENCY:   str | None = os.environ.get("MODEL_ID_CONSISTENCY")   or None
 MODEL_ID_NER:           str | None = os.environ.get("MODEL_ID_NER")           or None
+MODEL_ID_GEO_VALIDATION: str | None = os.environ.get("MODEL_ID_GEO_VALIDATION") or None
 
 THINKING_LEVEL: str = "medium"  # default fallback
 THINKING_LEVEL_LAYOUT: str = "high"  # complex layouts need deeper reasoning

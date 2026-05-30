@@ -29,6 +29,7 @@ populated).
 from __future__ import annotations
 
 import base64
+import difflib
 import json
 import logging
 import re
@@ -133,6 +134,94 @@ def _gt_page_text_for_prompt(gt_page: PageResult) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Verbatim-fidelity guard
+# ---------------------------------------------------------------------------
+# The matching LLM is only ever allowed to *select* which span of the
+# authoritative GT belongs to a region — never to rewrite it. Every value the
+# model returns is therefore snapped back onto a verbatim slice of the GT TEI
+# text before it is stored, so ``ground_truth_content`` is guaranteed to be
+# the original ground truth, character for character.
+
+def _canonical_gt_text(gt_page: PageResult) -> str:
+    """Authoritative, verbatim GT text for a page: the raw region contents
+    (no labels), in document order, joined by newlines. This is the only text
+    a region's ``ground_truth_content`` is ever allowed to be a slice of."""
+    return "\n".join(
+        r.content for r in gt_page.regions if r.content
+    )
+
+
+def _normalize_with_map(s: str) -> Tuple[str, List[int]]:
+    """Collapse whitespace runs to a single space and return the normalised
+    string plus a map from each normalised-char index back to its original
+    index in *s* (so a matched span can be sliced verbatim from the source)."""
+    chars: List[str] = []
+    idx_map: List[int] = []
+    prev_ws = False
+    for i, ch in enumerate(s):
+        if ch.isspace():
+            if prev_ws:
+                continue
+            chars.append(" ")
+            idx_map.append(i)
+            prev_ws = True
+        else:
+            chars.append(ch)
+            idx_map.append(i)
+            prev_ws = False
+    return "".join(chars), idx_map
+
+
+def _snap_to_canonical(
+    candidate: str,
+    canonical: str,
+    *,
+    min_ratio: float = 0.62,
+) -> Optional[str]:
+    """Return the verbatim slice of *canonical* that the model's *candidate*
+    corresponds to, or ``None`` when no faithful match exists.
+
+    Matching is whitespace- and case-insensitive (so the model may reflow
+    line breaks or letter case freely), but the returned text is always cut
+    verbatim from *canonical* — the model can never introduce a character
+    that is not in the original ground truth.
+    """
+    cand = (candidate or "").strip()
+    if not cand or not canonical:
+        return None
+
+    cn, _ = _normalize_with_map(cand)
+    norm, idx = _normalize_with_map(canonical)
+    if not cn or not norm:
+        return None
+
+    cn_cmp = cn.casefold()
+    norm_cmp = norm.casefold()
+
+    # 1) Exact (whitespace/case-insensitive) substring → slice verbatim.
+    pos = norm_cmp.find(cn_cmp)
+    if pos >= 0:
+        start = idx[pos]
+        end = idx[pos + len(cn) - 1] + 1
+        return canonical[start:end].strip()
+
+    # 2) Fuzzy: span from the first to the last matching block, accepted
+    #    only when it actually resembles the candidate.
+    sm = difflib.SequenceMatcher(a=norm_cmp, b=cn_cmp, autojunk=False)
+    blocks = [b for b in sm.get_matching_blocks() if b.size > 0]
+    if not blocks:
+        return None
+    a_start = blocks[0].a
+    a_end = blocks[-1].a + blocks[-1].size
+    span_cmp = norm_cmp[a_start:a_end]
+    if difflib.SequenceMatcher(a=span_cmp, b=cn_cmp).ratio() < min_ratio:
+        return None
+    start = idx[a_start]
+    end = idx[min(a_end, len(idx)) - 1] + 1
+    return canonical[start:end].strip()
+
+
+# ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
 
@@ -182,36 +271,32 @@ Rules for matching:
   * If the GT contains text not covered by any detected region, that's OK —
     do not invent a region for it.
 
-TEXT FIDELITY RULES (IMPORTANT)
--------------------------------
+TEXT FIDELITY RULES (CRITICAL)
+------------------------------
 
-The ground-truth text you produce must contain ONLY what is actually written
-on the page — no editorial additions:
+You may ONLY SELECT text from the ground truth — you may NOT rewrite it. The
+``ground_truth_content`` you return for a region must be copied VERBATIM from
+the "GROUND-TRUTH TEXT FOR THIS PAGE" block:
 
-  * Use the original spellings and abbreviations exactly as written.
-    NEVER substitute expanded forms of abbreviations (e.g. keep "St.",
-    "z.B.", "Hr." — do NOT write "Sankt", "zum Beispiel", "Herr").
-  * Do NOT modernise spellings.
-  * Keep editorial markers that were already produced upstream
-    (``[?]`` for uncertain words, ``[...]`` for gaps, ``~~text~~`` for
-    struck-through text, ``<u>text</u>`` for underlines). These mark
-    things visible on the page; don't strip them.
-  * Do NOT add any commentary, footnote references, or square-bracket
-    editorial supply that isn't already in the input GT text.
-  * If the input GT text for a segment contains an expanded abbreviation
-    that you can see was abbreviated in the manuscript image, replace it
-    with the abbreviated form as it actually appears on the page.
+  * Copy the characters exactly: same spelling, same abbreviations, same
+    punctuation, same editorial markers (``[?]``, ``[...]``, ``~~…~~``,
+    ``<u>…</u>``). Do NOT expand or contract abbreviations, do NOT modernise
+    spelling, do NOT add or remove anything.
+  * Do NOT add commentary, footnote references, or bracketed editorial supply
+    that is not already present in the GT text.
+  * Your only freedom is WHICH contiguous span of the GT text to assign to
+    each region (and you may leave whitespace/line breaks as they are — they
+    are ignored when the selection is validated).
+
+The returned text is automatically snapped back onto the original ground
+truth, so any wording you invent that is not present verbatim in the GT will
+be discarded.
 
 LINE-BREAK FORMATTING
 ---------------------
 
-Format each matched GT segment so its line breaks (``\\n``) match the line
-breaks the manuscript shows in that region — i.e., word-by-word, line-by-line,
-just like the pipeline's own transcription does. Use the image as the
-authority for where line breaks fall. The input GT text already contains
-newlines from its TEI ``<lb/>`` markers; honour those, but feel free to
-correct them when the image clearly shows a different lineation than what
-the GT TEI encoded.
+Keep the ground-truth text's own line breaks. Do not re-lineate it to match
+the manuscript; line breaks are not used when validating your selection.
 
 OUTPUT FORMAT
 -------------
@@ -286,6 +371,7 @@ def match_ground_truth_to_page(
     ]
     regions_json = json.dumps(serialised, ensure_ascii=False, indent=2)
     gt_text = _gt_page_text_for_prompt(gt_page)
+    canonical_gt = _canonical_gt_text(gt_page)
 
     prompt = _PROMPT.format(regions_json=regions_json, gt_text=gt_text)
 
@@ -339,25 +425,37 @@ def match_ground_truth_to_page(
             conf = 0.0
         match_map[idx] = (str(gt), conf)
 
-    # Apply matches
+    # Apply matches. Every returned segment is snapped back to a verbatim
+    # slice of the page's canonical GT text; a model rewrite that is not
+    # present in the GT is rejected (stored as empty) rather than persisted.
     import dataclasses
     out: List[Region] = []
     matched_count = 0
+    rejected_count = 0
     for r in regions:
         if r.region_index in match_map:
-            gt_text_match, conf = match_map[r.region_index]
-            out.append(dataclasses.replace(
-                r,
-                ground_truth_content=gt_text_match,
-                ground_truth_confidence=conf,
-            ))
-            if gt_text_match:
+            raw_gt, conf = match_map[r.region_index]
+            snapped = _snap_to_canonical(raw_gt, canonical_gt) if raw_gt else None
+            if snapped:
+                out.append(dataclasses.replace(
+                    r,
+                    ground_truth_content=snapped,
+                    ground_truth_confidence=conf,
+                ))
                 matched_count += 1
+            else:
+                if raw_gt:
+                    rejected_count += 1
+                out.append(dataclasses.replace(
+                    r,
+                    ground_truth_content="",
+                    ground_truth_confidence=0.0,
+                ))
         else:
             out.append(r)
     logger.info(
-        "  GT matched: %d / %d regions populated",
-        matched_count, len(regions),
+        "  GT matched: %d / %d regions populated (%d rejected as non-verbatim)",
+        matched_count, len(regions), rejected_count,
     )
     return out
 
