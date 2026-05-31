@@ -3879,7 +3879,9 @@ _JS = r"""
 
   var MIN_SCALE = 0.5;
   var MAX_SCALE = 2.6;
-  var FILL      = 0.97;   // target fraction of the bbox height to fill
+  var FILL      = 0.92;   // target fraction of the bbox height to fill
+                          // (<1 leaves a little breathing room between
+                          //  vertically adjacent regions)
 
   function reflowDocCanvas(canvas){
     if(!canvas) return;
@@ -3944,8 +3946,8 @@ _JS = r"""
       };
     });
 
-    var GAP_PX = 3;
-    var MIN_X_OVERLAP_RATIO = 0.35;
+    var GAP_PX = 7;
+    var MIN_X_OVERLAP_RATIO = 0.30;
     for(var pass = 0; pass < 8; pass++){
       items.sort(function(a, b){ return a.topPx - b.topPx; });
       var changed = false;
@@ -4237,8 +4239,19 @@ _JS = r"""
       page.querySelectorAll('.source-toggle button').forEach(function(b){
         b.classList.toggle('active', b.dataset.sourceMode === mode);
       });
+      // Diff renders more text than gemini/gt, so the per-box fit must be
+      // recomputed for the now-visible content to avoid overflow/overlap.
+      reflowForSource(page);
     });
   });
+
+  // Re-fit the document-view boxes for the page's current source mode.
+  function reflowForSource(page){
+    var panel = page.querySelector('.trans-panel');
+    if(panel && panel.getAttribute('data-mode') === 'document'){
+      requestAnimationFrame(function(){ reflowPage(page); });
+    }
+  }
 
   // Cycle through gemini → gt → diff → gemini (used by the keyboard
   // shortcut). Safe-no-ops on pages without GT.
@@ -4252,6 +4265,7 @@ _JS = r"""
     page.querySelectorAll('.source-toggle button').forEach(function(b){
       b.classList.toggle('active', b.dataset.sourceMode === nxt);
     });
+    reflowForSource(page);
   }
 
   // ============================================================
