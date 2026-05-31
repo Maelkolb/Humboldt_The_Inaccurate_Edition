@@ -2486,8 +2486,13 @@ body.view-text .facs-panel{display:none}
   flex:1;
   min-height:0;            /* lets the flex item shrink to share height */
   overflow:hidden;
+  /* Clean, neutral greige mat (museum lightbox feel) so the warm cream
+     facsimile reads crisply against it, with a soft vignette for depth. */
   background:
-    radial-gradient(ellipse at center, #c9b993 0%, #a89373 100%);
+    radial-gradient(ellipse 115% 95% at 50% 36%,
+      #ece7da 0%, #ddd6c6 58%, #cbc3b0 100%);
+  box-shadow:inset 0 0 70px rgba(60, 46, 24, .12),
+             inset 0 1px 0 rgba(255, 255, 255, .35);
   cursor:grab;
 }
 .facs-stage.is-grabbing{cursor:grabbing}
@@ -2511,8 +2516,9 @@ body.view-text .facs-panel{display:none}
   width:auto;
   height:auto;
   box-shadow:
-    0 4px 14px rgba(0, 0, 0, .25),
-    0 14px 50px rgba(0, 0, 0, .3);
+    0 1px 0 rgba(255, 255, 255, .5),
+    0 6px 18px rgba(46, 34, 14, .16),
+    0 18px 48px rgba(46, 34, 14, .20);
   border-radius:2px;
   overflow:hidden;
   background:var(--paper-light);
@@ -2670,10 +2676,8 @@ body.view-text .facs-panel{display:none}
 
 /* ===== DOCUMENT VIEW (centerpiece) ======================================= */
 .doc-canvas-wrap{
-  padding:1.4rem 1.4rem 1rem;
-  background:linear-gradient(180deg,
-    rgba(255, 248, 222, .25),
-    transparent 30%);
+  padding:1.5rem 1.5rem 1.1rem;
+  background:transparent;
 }
 .doc-canvas{
   position:relative;
@@ -2716,11 +2720,10 @@ body.view-text .facs-panel{display:none}
 .doc-rule--bottom{bottom:4%}
 
 /* Region slots — minimal chrome, typography is the design.
-   The slot is positioned and sized from its bbox (top/left/width + a
-   min-height floor). Its body is shrunk to fit and clipped to the box, so
-   a region's text always stays inside its own rectangle. A JS reflow pass
-   then pushes apart only the rare regions whose detector bboxes genuinely
-   overlap, so no content ever sits on top of other content. */
+   The slot is positioned and sized from its bbox (top/left/width). Its text
+   is scaled to fill that box, and a JS reflow pass pushes apart only the
+   rare regions whose detector bboxes genuinely overlap, so content never
+   sits on top of — or is cut off by — other content. */
 .doc-slot{
   position:absolute;
   padding:.18rem .28rem;
@@ -2786,17 +2789,16 @@ body.view-text .facs-panel{display:none}
 .doc-slot-body{
   height:auto;
   min-height:100%;
-  /* Content is clipped to its own bbox so a region can never spill over
-     a neighbouring region. The JS reflow shrinks the font (never grows it
-     past scale 1) until the text fits inside the box, so clipping is only
-     a last-resort guard. */
+  /* Clipped to the slot as a guard; the JS fit pass sizes the box to the
+     content (growing it when a dense region can't shrink to fit) so visible
+     text is never actually cut off. */
   overflow:hidden;
   font-family:var(--f-body);
   color:var(--text);
   line-height:1.45;
-  /* Font sizes multiply by --slot-scale (default 1). The JS auto-fit pass
-     sets this per-instance to shrink text down to fit its bbox; it is never
-     scaled above 1, keeping placement faithful to the page geometry. */
+  /* Font sizes multiply by --slot-scale (default 1). The JS fit pass sets
+     this per-instance so each region's text fills its bbox — exactly as the
+     handwriting fills that area on the original page. */
   font-size:calc(clamp(.62rem, 0.95cqi, .92rem) * var(--slot-scale, 1));
 }
 .doc-canvas{container-type:inline-size}
@@ -3856,26 +3858,28 @@ _JS = r"""
   document.addEventListener('webkitfullscreenchange', updateFsButtons);
 
   // ============================================================
-  // Document view layout pass — per-instance scaling + overlap reflow
+  // Document view layout pass — fill-to-bbox + overlap reflow
   // ------------------------------------------------------------
-  // Reflow pass for the bbox-positioned Document view.
+  //   (1) Fill-to-fit: each region's text is scaled so it fills its own
+  //       bbox — exactly as the handwriting fills that area on the page —
+  //       growing OR shrinking within [MIN_SCALE, MAX_SCALE]. This removes
+  //       the empty gaps left when short transcriptions sat at the top of a
+  //       tall box. If a dense region still overflows at MIN_SCALE, the box
+  //       is allowed to grow taller (never clipping text), and the cascade
+  //       below keeps it off its neighbours.
   //
-  //   (1) Shrink-to-fit: for each slot, scale its body font DOWN (never
-  //       above 1) until the text fits inside its own bbox height. Body
-  //       overflow is clipped, so a region's text can never spill into a
-  //       neighbour. Placement therefore stays faithful to the page.
-  //
-  //   (2) Overlap safety net: the only remaining way two regions can
-  //       collide is when their detector bboxes genuinely overlap. A
-  //       cascade pushes the lower region down just enough to clear the
-  //       upper one. Two regions only count as stacked when their shared
-  //       x-range covers >= MIN_X_OVERLAP_RATIO of the wider region, so a
-  //       narrow margin note still sits *beside* a wide body paragraph.
-  //       Tops are written in PIXELS so they stay stable when the canvas
-  //       grows via min-height to swallow any downward push.
+  //   (2) Overlap safety net: regions only collide when their detector
+  //       bboxes genuinely overlap. A cascade pushes the lower region down
+  //       just enough to clear the upper one, counting them as stacked only
+  //       when their shared x-range covers >= MIN_X_OVERLAP_RATIO of the
+  //       wider region (so a narrow margin note sits *beside* a wide body
+  //       paragraph). Tops are written in PIXELS so they stay stable when
+  //       the canvas grows to swallow a downward push.
   // ============================================================
 
   var MIN_SCALE = 0.5;
+  var MAX_SCALE = 2.6;
+  var FILL      = 0.97;   // target fraction of the bbox height to fill
 
   function reflowDocCanvas(canvas){
     if(!canvas) return;
@@ -3893,22 +3897,36 @@ _JS = r"""
     var canvasH = canvas.getBoundingClientRect().height;
     if(!canvasH) return;                              // hidden / not laid out
 
-    // ---- Step 1: shrink each slot's text to fit its bbox height --------
+    // ---- Step 1: scale each slot's text to fill its bbox height --------
     slots.forEach(function(s){
       var body = s.querySelector('.doc-slot-body');
       if(!body) return;
-      var bboxH = (parseFloat(s.dataset.origH || '0') / 100) * canvasH;
+      var origH = parseFloat(s.dataset.origH || '0');
+      var bboxH = (origH / 100) * canvasH;
       if(bboxH < 6) return;                           // too small to bother
+
+      // Measure pure content height (lift the bbox min-height floor).
+      s.style.minHeight = '0';
       var scale = 1;
-      for(var it = 0; it < 3; it++){
+      for(var it = 0; it < 5; it++){
         s.style.setProperty('--slot-scale', scale.toFixed(3));
         var natural = body.scrollHeight;
-        if(natural <= bboxH + 0.5) break;             // fits
-        scale = Math.max(MIN_SCALE, scale * (bboxH / natural) * 0.98);
-        if(scale <= MIN_SCALE){
-          s.style.setProperty('--slot-scale', MIN_SCALE.toFixed(3));
-          break;
-        }
+        if(natural < 1) break;
+        var corr = (bboxH * FILL) / natural;
+        var next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * corr));
+        if(Math.abs(next - scale) < 0.01){ scale = next; break; }
+        scale = next;
+      }
+      s.style.setProperty('--slot-scale', scale.toFixed(3));
+
+      // If the text still overflows its bbox (dense region clamped at
+      // MIN_SCALE), let the box grow so nothing is cut off; otherwise keep
+      // it on its exact bbox rectangle.
+      var finalH = body.scrollHeight;
+      if(finalH > bboxH + 1){
+        s.style.minHeight = Math.ceil(finalH) + 'px';
+      } else {
+        s.style.minHeight = origH.toFixed(3) + '%';
       }
     });
 
