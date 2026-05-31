@@ -347,6 +347,115 @@ def _reflow_to_reference(gt_text: str, ref_text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Deterministic body fallback
+# ---------------------------------------------------------------------------
+# The LLM matcher occasionally returns nothing for the main body on pages
+# where the pipeline's transcription is badly garbled — it can't confidently
+# align Gemini→GT. But the ground truth IS in the TEI, so rather than lose it
+# we cut the GT main-text deterministically and assign it to the detected
+# main_text regions by token alignment. No model call, always available.
+
+_NONWS_RE = re.compile(r"\S+")
+
+
+def _split_gt_main_text(
+    gemini_segments: List[str], gt_text: str
+) -> List[str]:
+    """Split *gt_text* across the detected main_text regions, aligning by
+    content. Returns one verbatim slice per segment (in order); a segment with
+    no alignment anchor gets ``""`` rather than mismatched text.
+    """
+    gt_toks = [(m.group(), m.start(), m.end())
+               for m in _NONWS_RE.finditer(gt_text)]
+    if not gt_toks:
+        return ["" for _ in gemini_segments]
+    if len(gemini_segments) <= 1:
+        return [gt_text.strip()]
+
+    gt_words = [t[0].casefold() for t in gt_toks]
+    flat, seg_of = [], []
+    for si, seg in enumerate(gemini_segments):
+        for w in (seg or "").split():
+            flat.append(w.casefold())
+            seg_of.append(si)
+
+    anchors: List[Optional[int]] = [None] * len(gemini_segments)
+    for a, b, size in difflib.SequenceMatcher(
+        a=flat, b=gt_words, autojunk=False
+    ).get_matching_blocks():
+        for k in range(size):
+            si = seg_of[a + k]
+            if anchors[si] is None:
+                anchors[si] = b + k
+
+    # Cut points: segment 0 always starts at 0; later segments start at their
+    # first (monotonically increasing) anchor. Unanchored segments get "".
+    cuts: List[Tuple[int, int]] = [(0, 0)]
+    last = 0
+    for i in range(1, len(gemini_segments)):
+        a = anchors[i]
+        if a is not None and a > last:
+            cuts.append((i, a))
+            last = a
+
+    slices = ["" for _ in gemini_segments]
+    for k, (seg, start) in enumerate(cuts):
+        end_word = cuts[k + 1][1] if k + 1 < len(cuts) else len(gt_toks)
+        if start >= len(gt_toks) or end_word <= start:
+            continue
+        c0 = gt_toks[start][1]
+        c1 = gt_toks[end_word - 1][2]
+        slices[seg] = gt_text[c0:c1].strip()
+    return slices
+
+
+def _ensure_body_gt(
+    regions: List[Region], gt_page: PageResult
+) -> List[Region]:
+    """Deterministic safety net: if the detected ``main_text`` regions came
+    back with no ground truth, cut the GT main-text from the TEI and assign it
+    to them directly (re-lineated to the manuscript). Other regions and any
+    GT the matcher already produced are left untouched.
+    """
+    import dataclasses
+
+    body_idx = [i for i, r in enumerate(regions)
+                if r.region_type == "main_text"]
+    if not body_idx:
+        return regions
+    if any(regions[i].ground_truth_content for i in body_idx):
+        return regions  # matcher already populated the body — leave it
+
+    gt_main = "\n".join(
+        r.content for r in gt_page.regions
+        if r.region_type == "main_text" and r.content
+    ).strip()
+    if not gt_main:
+        return regions
+
+    segments = [regions[i].content or "" for i in body_idx]
+    slices = _split_gt_main_text(segments, gt_main)
+
+    out = list(regions)
+    assigned = 0
+    for i, sl in zip(body_idx, slices):
+        if not sl:
+            continue
+        out[i] = dataclasses.replace(
+            out[i],
+            ground_truth_content=_reflow_to_reference(sl, out[i].content or ""),
+            ground_truth_confidence=0.5,   # deterministic, not model-scored
+        )
+        assigned += 1
+    if assigned:
+        logger.info(
+            "  GT body filled deterministically from TEI "
+            "(%d/%d main_text regions).", assigned, len(body_idx),
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
 
@@ -594,6 +703,9 @@ def match_ground_truth_to_page(
         "  GT matched: %d / %d regions populated (%d rejected as non-verbatim)",
         matched_count, len(regions), rejected_count,
     )
+    # Deterministic safety net for the main body (handles pages where the
+    # matcher couldn't align a badly-garbled transcription to the GT).
+    out = _ensure_body_gt(out, gt_page)
     return out
 
 
@@ -649,5 +761,37 @@ def annotate_results_with_ground_truth(
     logger.info(
         "Ground-truth matching complete: %d / %d pages matched.",
         matched_pages, len(results),
+    )
+    return results
+
+
+def fill_missing_body_ground_truth(
+    results: List[PageResult],
+    gt_tei: str | Path,
+) -> List[PageResult]:
+    """Offline (no model calls): fill the main-text ground truth on any page
+    whose body came back empty, by cutting it deterministically from the GT
+    TEI. Pages whose body already has GT — and all non-body regions — are left
+    untouched. Useful for repairing an existing run without re-processing.
+    """
+    gt_index = _build_gt_index(gt_tei)
+    filled = 0
+    for result in results:
+        gt_page = gt_lookup(gt_index, result.folio_label)
+        if gt_page is None:
+            continue
+        before = any(
+            r.region_type == "main_text" and r.ground_truth_content
+            for r in result.regions
+        )
+        result.regions = _ensure_body_gt(result.regions, gt_page)
+        after = any(
+            r.region_type == "main_text" and r.ground_truth_content
+            for r in result.regions
+        )
+        if after and not before:
+            filled += 1
+    logger.info(
+        "Filled missing body ground truth on %d page(s) from the TEI.", filled
     )
     return results
