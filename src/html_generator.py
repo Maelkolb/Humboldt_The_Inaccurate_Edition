@@ -273,6 +273,76 @@ def _render_gt_plain(text: str) -> str:
     return _render_plain(text or "")
 
 
+# ---------------------------------------------------------------------------
+# CER / WER — diff-mode accuracy metrics for the main-text regions
+# ---------------------------------------------------------------------------
+
+_WS_COLLAPSE_RE = re.compile(r"\s+")
+
+
+def _norm_ws(text: str) -> str:
+    """Collapse whitespace runs to single spaces and strip ends."""
+    return _WS_COLLAPSE_RE.sub(" ", (text or "")).strip()
+
+
+def _edit_distance(a: List[str], b: List[str]) -> int:
+    """Levenshtein distance over two token sequences (chars or words)."""
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(
+                prev[j] + 1,
+                cur[j - 1] + 1,
+                prev[j - 1] + (0 if ca == cb else 1),
+            ))
+        prev = cur
+    return prev[-1]
+
+
+def _cer_wer_for_main_text(
+    regions: List[Region],
+) -> Optional[Tuple[float, float, int]]:
+    """Character- and word-error rate of the Gemini transcription against the
+    ground truth, computed over the page's ``main_text`` regions only.
+
+    The ground truth is the reference: CER = edit_distance(chars) / |GT chars|,
+    WER = edit_distance(words) / |GT words|. Returns ``(cer, wer, n_regions)``
+    or ``None`` when no main_text region has ground-truth content.
+    """
+    hyp_parts: List[str] = []
+    ref_parts: List[str] = []
+    n = 0
+    for r in regions:
+        if r.region_type != "main_text":
+            continue
+        gt = r.ground_truth_content
+        if not gt:
+            continue
+        hyp_parts.append(_norm_ws(r.content or ""))
+        ref_parts.append(_norm_ws(gt))
+        n += 1
+    if n == 0:
+        return None
+
+    hyp = _norm_ws(" ".join(hyp_parts))
+    ref = _norm_ws(" ".join(ref_parts))
+    if not ref:
+        return None
+
+    cer = _edit_distance(list(hyp), list(ref)) / len(ref)
+    ref_words = ref.split(" ")
+    hyp_words = hyp.split(" ") if hyp else []
+    wer = _edit_distance(hyp_words, ref_words) / len(ref_words)
+    return (cer, wer, n)
+
+
 _RE_UNDERLINE_CROSS = re.compile(
     r'&lt;u&gt;(.*?)&lt;/u&gt;', re.DOTALL
 )
@@ -434,6 +504,10 @@ def _region_classes(r: Region) -> str:
         cls += " is-margin-top"
     elif mp in ("mBottom", "bottom"):
         cls += " is-margin-bottom"
+    # Regions with no matched ground truth are dimmed in GT/Diff modes so the
+    # source toggle is visibly responsive even on partially-matched pages.
+    if not getattr(r, "ground_truth_content", None):
+        cls += " is-no-gt"
     return cls
 
 
@@ -612,10 +686,12 @@ def _doc_inline_content(
     rtype = region.region_type
 
     if region.is_visual or rtype == "sketch":
+        desc = _render_region_text(region, entities, ec) \
+            if region.content else _render_plain("[sketch]")
         return (
             f'<span class="doc-sketch-desc">'
             f'<span class="doc-sketch-mark" aria-hidden="true">✦</span>'
-            f'{_render_plain(region.content or "[sketch]")}</span>'
+            f'{desc}</span>'
         )
 
     if rtype in ("observation_table", "instrument_list"):
@@ -635,7 +711,7 @@ def _doc_inline_content(
     if rtype == "coordinates":
         return (
             f'<span class="doc-coords">'
-            f'{_render_plain(region.content or "")}</span>'
+            f'{_render_region_text(region, entities, ec)}</span>'
         )
 
     if rtype == "crossed_out":
@@ -1331,6 +1407,28 @@ def generate_html_edition(
             result.regions, result.entities, ec, rc, rl, idx
         )
 
+        # ── Diff-mode metrics: CER/WER of the main-text regions vs. GT.
+        #    Only rendered (and only made visible by CSS) when this page has
+        #    ground truth and the user switches to the Diff tab.
+        metrics_html = ""
+        if has_gt:
+            cw = _cer_wer_for_main_text(result.regions)
+            if cw is not None:
+                cer, wer, n_mt = cw
+                metrics_html = (
+                    '<div class="diff-metrics" role="status" aria-live="polite">'
+                    '<span class="diff-metrics-title">'
+                    'Main-text accuracy vs. ground truth</span>'
+                    '<span class="dm-pill"><span class="dm-k">CER</span>'
+                    f'<span class="dm-v">{cer * 100:.1f}%</span></span>'
+                    '<span class="dm-pill"><span class="dm-k">WER</span>'
+                    f'<span class="dm-v">{wer * 100:.1f}%</span></span>'
+                    '<span class="dm-pill dm-pill--muted">'
+                    '<span class="dm-k">main-text regions</span>'
+                    f'<span class="dm-v">{n_mt}</span></span>'
+                    '</div>'
+                )
+
         cols_cls = "page-cols" if facs_panel else "page-cols is-text-only"
 
         # The data-source-mode attribute drives the Gemini/GT/Diff CSS
@@ -1359,6 +1457,7 @@ def generate_html_edition(
             '  </header>'
             f'  {stats_html}'
             f'  {tools_html}'
+            f'  {metrics_html}'
             f'  <div class="{cols_cls}">'
             f'    {facs_panel}'
             '    <section class="trans-panel" data-mode="document">'
@@ -2165,6 +2264,46 @@ body::before{
   box-shadow:0 1px 2px rgba(27, 36, 64, .2);
 }
 
+/* ── Diff-mode accuracy metrics (CER / WER) ──────────────────────────
+   Rendered on GT pages but only revealed when the Diff tab is active. */
+.diff-metrics{display:none}
+.page[data-source-mode="diff"] .diff-metrics{
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:.5rem;
+  margin:.1rem 0 .5rem;
+  padding:.42rem .7rem;
+  background:var(--paper-light);
+  border:1px solid var(--rule);
+  border-radius:var(--r-sm);
+  font-family:var(--f-ui);
+  font-size:.74rem;
+}
+.diff-metrics-title{
+  color:var(--text-mid);
+  font-weight:500;
+  margin-right:.25rem;
+}
+.dm-pill{
+  display:inline-flex;align-items:center;gap:.34rem;
+  padding:.12rem .55rem;
+  border-radius:999px;
+  background:color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.dm-pill .dm-k{
+  color:var(--text-mid);
+  letter-spacing:.04em;
+  font-size:.64rem;
+  text-transform:uppercase;
+}
+.dm-pill .dm-v{
+  color:var(--ink);
+  font-weight:600;
+  font-variant-numeric:tabular-nums;
+}
+.dm-pill--muted .dm-v{color:var(--text-mid);font-weight:500}
+
 /* ── Region content variants ────────────────────────────────────────
    When a region has ground_truth_content, the inline content is wrapped
    in a <span class="region-content has-gt"> that holds three children —
@@ -2177,6 +2316,17 @@ body::before{
 .page[data-source-mode="gemini"] .region-content.has-gt .rc--gemini{display:inline}
 .page[data-source-mode="gt"]     .region-content.has-gt .rc--gt{display:inline}
 .page[data-source-mode="diff"]   .region-content.has-gt .rc--diff{display:inline}
+
+/* In Ground-Truth / Diff modes, fade regions that have no matched ground
+   truth so the toggle is visibly responsive and it's clear *which* regions
+   are being compared (only matters on pages that actually carry GT). */
+.page[data-has-gt="true"][data-source-mode="gt"]   .doc-slot.is-no-gt,
+.page[data-has-gt="true"][data-source-mode="diff"] .doc-slot.is-no-gt,
+.page[data-has-gt="true"][data-source-mode="gt"]   .r.is-no-gt,
+.page[data-has-gt="true"][data-source-mode="diff"] .r.is-no-gt{
+  opacity:.4;
+  transition:opacity .2s var(--ease);
+}
 
 /* Subtle confidence-attenuation cue (lower opacity for low-confidence GT) */
 .region-content.has-gt[data-gt-confidence="0.00"] .rc--gt,
@@ -2353,8 +2503,13 @@ body.view-text .facs-panel{display:none}
   flex:1;
   min-height:0;            /* lets the flex item shrink to share height */
   overflow:hidden;
+  /* Clean, neutral greige mat (museum lightbox feel) so the warm cream
+     facsimile reads crisply against it, with a soft vignette for depth. */
   background:
-    radial-gradient(ellipse at center, #c9b993 0%, #a89373 100%);
+    radial-gradient(ellipse 115% 95% at 50% 36%,
+      #ece7da 0%, #ddd6c6 58%, #cbc3b0 100%);
+  box-shadow:inset 0 0 70px rgba(60, 46, 24, .12),
+             inset 0 1px 0 rgba(255, 255, 255, .35);
   cursor:grab;
 }
 .facs-stage.is-grabbing{cursor:grabbing}
@@ -2378,8 +2533,9 @@ body.view-text .facs-panel{display:none}
   width:auto;
   height:auto;
   box-shadow:
-    0 4px 14px rgba(0, 0, 0, .25),
-    0 14px 50px rgba(0, 0, 0, .3);
+    0 1px 0 rgba(255, 255, 255, .5),
+    0 6px 18px rgba(46, 34, 14, .16),
+    0 18px 48px rgba(46, 34, 14, .20);
   border-radius:2px;
   overflow:hidden;
   background:var(--paper-light);
@@ -2537,10 +2693,8 @@ body.view-text .facs-panel{display:none}
 
 /* ===== DOCUMENT VIEW (centerpiece) ======================================= */
 .doc-canvas-wrap{
-  padding:1.4rem 1.4rem 1rem;
-  background:linear-gradient(180deg,
-    rgba(255, 248, 222, .25),
-    transparent 30%);
+  padding:1.5rem 1.5rem 1.1rem;
+  background:transparent;
 }
 .doc-canvas{
   position:relative;
@@ -2583,10 +2737,10 @@ body.view-text .facs-panel{display:none}
 .doc-rule--bottom{bottom:4%}
 
 /* Region slots — minimal chrome, typography is the design.
-   The slot is positioned by bbox and uses *min-height* (set inline) so it
-   can grow to fit content that's taller than the original ink extent —
-   important for tables and dense main_text passages. Overflow is visible;
-   overlaps are then prevented by a JS reflow pass at render time. */
+   The slot is positioned and sized from its bbox (top/left/width). Its text
+   is scaled to fill that box, and a JS reflow pass pushes apart only the
+   rare regions whose detector bboxes genuinely overlap, so content never
+   sits on top of — or is cut off by — other content. */
 .doc-slot{
   position:absolute;
   padding:.18rem .28rem;
@@ -2616,15 +2770,19 @@ body.view-text .facs-panel{display:none}
   z-index:50;
 }
 
-/* The tiny region-type indicator chip */
+/* The tiny region-type indicator chip. Floated just ABOVE the slot's top
+   edge (not over the body) so the label and the transcribed text are both
+   fully visible when a slot is hovered/active. */
 .doc-chip{
   position:absolute;
-  top:-1px;left:-1px;
+  left:-1px;
+  bottom:100%;
+  margin-bottom:2px;
   display:inline-flex;align-items:center;gap:.28rem;
   padding:1px 6px 1px 4px;
   background:var(--paper-light);
   border:1px solid color-mix(in srgb, var(--chip-color) 55%, var(--rule));
-  border-radius:0 0 var(--r-xs) 0;
+  border-radius:var(--r-xs);
   font-family:var(--f-ui);
   font-size:.6rem;
   color:var(--chip-color);
@@ -2634,7 +2792,8 @@ body.view-text .facs-panel{display:none}
   pointer-events:none;
   transition:opacity .15s var(--ease);
   white-space:nowrap;
-  z-index:1;
+  box-shadow:0 1px 3px rgba(80, 56, 24, .18);
+  z-index:60;
 }
 .doc-slot:hover .doc-chip,
 .doc-slot:focus-visible .doc-chip,
@@ -2647,15 +2806,16 @@ body.view-text .facs-panel{display:none}
 .doc-slot-body{
   height:auto;
   min-height:100%;
-  overflow:visible;
+  /* Clipped to the slot as a guard; the JS fit pass sizes the box to the
+     content (growing it when a dense region can't shrink to fit) so visible
+     text is never actually cut off. */
+  overflow:hidden;
   font-family:var(--f-body);
   color:var(--text);
   line-height:1.45;
-  /* Font sizes multiply by --slot-scale (default 1). A JS auto-fit pass
-     sets this per-instance so each slot's text fills its own bbox: large
-     bboxes get scaled up (capped per region type), while content that
-     already fills or overflows its bbox stays at scale 1 — the cascade
-     pass below handles the overflow case without shrinking text. */
+  /* Font sizes multiply by --slot-scale (default 1). The JS fit pass sets
+     this per-instance so each region's text fills its bbox — exactly as the
+     handwriting fills that area on the original page. */
   font-size:calc(clamp(.62rem, 0.95cqi, .92rem) * var(--slot-scale, 1));
 }
 .doc-canvas{container-type:inline-size}
@@ -3715,69 +3875,30 @@ _JS = r"""
   document.addEventListener('webkitfullscreenchange', updateFsButtons);
 
   // ============================================================
-  // Document view layout pass — per-instance scaling + overlap reflow
+  // Document view layout pass — fill-to-bbox + overlap reflow
   // ------------------------------------------------------------
-  // Three-step pass for the bbox-positioned Document view:
+  //   (1) Fill-to-fit: each region's text is scaled so it fills its own
+  //       bbox — exactly as the handwriting fills that area on the page —
+  //       growing OR shrinking within [MIN_SCALE, MAX_SCALE]. This removes
+  //       the empty gaps left when short transcriptions sat at the top of a
+  //       tall box. If a dense region still overflows at MIN_SCALE, the box
+  //       is allowed to grow taller (never clipping text), and the cascade
+  //       below keeps it off its neighbours.
   //
-  //   (1) Measure each slot's natural content height at scale 1.
-  //       The slot's inline min-height (from the bbox) is temporarily
-  //       neutralised so the body's offsetHeight reflects *real*
-  //       content, not the bbox-stretched value.
-  //
-  //   (2) Compute ONE scale PER INSTANCE so that each slot's text
-  //       fills its own bbox as well as possible. This is a change
-  //       from the earlier per-type unified scale: with the old
-  //       scheme, a single small main_text region in a tight bbox
-  //       would force every other main_text region on the page to
-  //       stay at scale 1, even ones with huge bboxes and tiny text.
-  //       Now each instance gets its own scale — capped per region
-  //       type so display/data still keep distinct visual weights,
-  //       but large bboxes actually get filled. We deliberately do
-  //       NOT shrink anything below scale 1: if natural content is
-  //       already at or above its bbox, we leave it alone and let
-  //       the cascade handle any vertical overlap. Shrinking text
-  //       below readable sizes (and the cascading consequences of
-  //       doing so on multiple stacked regions) was causing regions
-  //       to be pushed off-canvas.
-  //
-  //   (3) Cascade-resolve vertical overlaps and write tops back in
-  //       *pixels* (not percentages of canvasH). If we wrote them as
-  //       % and then grew the canvas via min-height to swallow
-  //       overflow, every percentage would suddenly refer to a
-  //       taller box and slots near the bottom would slide past the
-  //       new canvas bottom — where the trans-panel's overflow:hidden
-  //       would clip them. That is exactly the "cut off at bottom"
-  //       bug. Pixel offsets are stable through canvas-height changes.
-  //
-  //       The cascade uses a *mutual* x-overlap test: two regions
-  //       only count as vertically stacked (and so cascade-able) if
-  //       their shared x-range is ≥ 30 % of the wider region. This
-  //       is what lets a narrow left-margin note coexist side-by-
-  //       side with a wide body paragraph instead of pushing it
-  //       down. Two paragraphs of equal width still hit ratio 1.0
-  //       and stack normally.
+  //   (2) Overlap safety net: regions only collide when their detector
+  //       bboxes genuinely overlap. A cascade pushes the lower region down
+  //       just enough to clear the upper one, counting them as stacked only
+  //       when their shared x-range covers >= MIN_X_OVERLAP_RATIO of the
+  //       wider region (so a narrow margin note sits *beside* a wide body
+  //       paragraph). Tops are written in PIXELS so they stay stable when
+  //       the canvas grows to swallow a downward push.
   // ============================================================
 
-  // Per-region-type ceiling on the per-instance scale factor.
-  // Conservative on purpose: aggressive caps caused vertical cascade
-  // pushes that knocked some regions off-canvas. These values give
-  // visibly bigger text in roomy bboxes without ever forcing a region
-  // out of its lane.
-  var SCALE_CAP_BY_TYPE = {
-    entry_heading:    1.9,
-    main_text:        1.6,
-    marginal_note:    1.7,
-    coordinates:      1.6,
-    bibliographic_ref:1.5,
-    crossed_out:      1.6,
-    catch_phrase:     1.9,
-    page_number:      2.0,
-    sketch:           1.5,
-    calculation:      1.3,
-    observation_table:1.2,
-    instrument_list:  1.2,
-    pasted_slip:      1.5,
-  };
+  var MIN_SCALE = 0.5;
+  var MAX_SCALE = 2.6;
+  var FILL      = 0.92;   // target fraction of the bbox height to fill
+                          // (<1 leaves a little breathing room between
+                          //  vertically adjacent regions)
 
   function reflowDocCanvas(canvas){
     if(!canvas) return;
@@ -3793,77 +3914,44 @@ _JS = r"""
       s.style.setProperty('--slot-scale', '1');
     });
     var canvasH = canvas.getBoundingClientRect().height;
-    if(!canvasH) return;                            // hidden / not laid out
+    if(!canvasH) return;                              // hidden / not laid out
 
-    // ---- Step 1: measure each slot's natural content height -----------
-    var measurements = slots.map(function(s){
-      var savedMinH = s.style.minHeight;
-      s.style.minHeight = '0';                      // lift the bbox floor
+    // ---- Step 1: scale each slot's text to fill its bbox height --------
+    slots.forEach(function(s){
       var body = s.querySelector('.doc-slot-body');
-      var natural = body ? body.offsetHeight : 0;
-      s.style.minHeight = savedMinH;                // restore
+      if(!body) return;
       var origH = parseFloat(s.dataset.origH || '0');
-      return {
-        slot: s,
-        type: s.dataset.regionType || '',
-        natural: natural,
-        bboxH: (origH / 100) * canvasH,
-      };
+      var bboxH = (origH / 100) * canvasH;
+      if(bboxH < 6) return;                           // too small to bother
+
+      // Measure pure content height (lift the bbox min-height floor).
+      s.style.minHeight = '0';
+      var scale = 1;
+      for(var it = 0; it < 5; it++){
+        s.style.setProperty('--slot-scale', scale.toFixed(3));
+        var natural = body.scrollHeight;
+        if(natural < 1) break;
+        var corr = (bboxH * FILL) / natural;
+        var next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * corr));
+        if(Math.abs(next - scale) < 0.01){ scale = next; break; }
+        scale = next;
+      }
+      s.style.setProperty('--slot-scale', scale.toFixed(3));
+
+      // If the text still overflows its bbox (dense region clamped at
+      // MIN_SCALE), let the box grow so nothing is cut off; otherwise keep
+      // it on its exact bbox rectangle.
+      var finalH = body.scrollHeight;
+      if(finalH > bboxH + 1){
+        s.style.minHeight = Math.ceil(finalH) + 'px';
+      } else {
+        s.style.minHeight = origH.toFixed(3) + '%';
+      }
     });
 
-    // ---- Step 2: compute one scale PER INSTANCE -----------------------
-    // For each slot independently, work out how much we can grow its
-    // font so the content visually fills its bbox. Height grows roughly
-    // as natural × scale^GROW_EXP — empirically between linear (single
-    // line) and quadratic (paragraphs that re-wrap into more lines as
-    // characters widen). We use 1.7 which over-estimates growth a touch
-    // and keeps us on the safe side of overflow.
-    //
-    // Important rules (designed to prevent regions from being pushed
-    // off-canvas, which the more aggressive previous version did):
-    //   * NEVER shrink below scale 1 — we'd rather let big content stay
-    //     readable and trigger the cascade than render it at unreadable
-    //     sizes.
-    //   * If content is already nearly filling its bbox at scale 1
-    //     (natural ≥ 78 % of bboxH), don't grow either — risk of
-    //     overflow is too high.
-    //   * Otherwise scale up to fill SAFETY_FILL × bboxH, capped by
-    //     SCALE_CAP_BY_TYPE.
-    var SAFETY_FILL = 0.88;
-    var GROW_EXP    = 1.7;
-
-    measurements.forEach(function(m){
-      if(m.bboxH < 8 || m.natural < 1){
-        m.slot.style.setProperty('--slot-scale', '1');
-        return;
-      }
-      // Already filling its bbox? Leave alone.
-      if(m.natural >= m.bboxH * 0.78){
-        m.slot.style.setProperty('--slot-scale', '1');
-        return;
-      }
-      var cap = SCALE_CAP_BY_TYPE[m.type] || 1.5;
-      var fillScale = Math.pow(
-        m.bboxH * SAFETY_FILL / m.natural,
-        1 / GROW_EXP,
-      );
-      // Clamp into [1.0 .. cap] — never go below 1.
-      var scale = Math.min(cap, Math.max(1.0, fillScale));
-      m.slot.style.setProperty('--slot-scale', scale.toFixed(3));
-    });
-
-    // ---- Step 3: cascade-resolve any vertical overlaps ----------------
-    // Two regions are considered "vertical neighbours" (i.e. one should
-    // sit below the other) only if their horizontal ranges genuinely
-    // share a lane — defined as their shared x-range covering at least
-    // MIN_X_OVERLAP_RATIO of the wider of the two. This is what lets a
-    // narrow left-margin note (x ≈ 0–15 %) sit *beside* a wide body
-    // paragraph (x ≈ 0–90 %): their shared range is only 15 / 90 ≈ 17 %
-    // of the wider region, below the threshold, so the cascade leaves
-    // them where their bboxes put them. Two stacked paragraphs of the
-    // same width still hit ratio 1.0 and get cascaded as before.
+    // ---- Step 2: cascade-resolve overlapping bboxes -------------------
     var items = slots.map(function(s){
-      var top   = parseFloat(s.style.top || '0');
+      var top   = parseFloat(s.style.top || '0');     // % of canvas
       var left  = parseFloat(s.style.left || '0');
       var width = parseFloat(s.style.width || '0');
       return {
@@ -3875,8 +3963,8 @@ _JS = r"""
       };
     });
 
-    var GAP_PX = 4;
-    var MIN_X_OVERLAP_RATIO = 0.3;
+    var GAP_PX = 7;
+    var MIN_X_OVERLAP_RATIO = 0.30;
     for(var pass = 0; pass < 8; pass++){
       items.sort(function(a, b){ return a.topPx - b.topPx; });
       var changed = false;
@@ -3886,14 +3974,11 @@ _JS = r"""
         var curW = cur.right - cur.left;
         for(var j = i + 1; j < items.length; j++){
           var other = items[j];
-          // Mutual horizontal overlap, as a fraction of the wider region.
-          var ovL = Math.max(cur.left, other.left);
-          var ovR = Math.min(cur.right, other.right);
-          var ov  = ovR - ovL;
-          if(ov <= 0.2) continue;                   // no real overlap
+          var ov = Math.min(cur.right, other.right) -
+                   Math.max(cur.left, other.left);
+          if(ov <= 0.2) continue;
           var maxW = Math.max(curW, other.right - other.left);
           if(maxW <= 0 || ov / maxW < MIN_X_OVERLAP_RATIO) continue;
-          // Side-by-side enough? skip. Otherwise enforce the gap.
           if(other.topPx < curBottom + GAP_PX){
             other.topPx = curBottom + GAP_PX;
             changed = true;
@@ -3903,21 +3988,19 @@ _JS = r"""
       if(!changed) break;
     }
 
-    // Write tops in PIXELS (see comment above the function for why).
+    // Write tops in PIXELS (stable through canvas-height changes).
     items.forEach(function(it){
       it.slot.style.top = Math.round(it.topPx) + 'px';
     });
 
     // Grow the canvas if the cascade pushed content past the bottom.
-    // Generous padding here (16 px) plus an early trigger (canvasH-8)
-    // gives a little breathing room under the last slot.
     var maxBottom = 0;
     items.forEach(function(it){
       var b = it.topPx + it.heightPx;
       if(b > maxBottom) maxBottom = b;
     });
     if(maxBottom > canvasH - 8){
-      canvas.style.minHeight = Math.ceil(maxBottom + 16) + 'px';
+      canvas.style.minHeight = Math.ceil(maxBottom + 12) + 'px';
     }
   }
 
@@ -4173,8 +4256,19 @@ _JS = r"""
       page.querySelectorAll('.source-toggle button').forEach(function(b){
         b.classList.toggle('active', b.dataset.sourceMode === mode);
       });
+      // Diff renders more text than gemini/gt, so the per-box fit must be
+      // recomputed for the now-visible content to avoid overflow/overlap.
+      reflowForSource(page);
     });
   });
+
+  // Re-fit the document-view boxes for the page's current source mode.
+  function reflowForSource(page){
+    var panel = page.querySelector('.trans-panel');
+    if(panel && panel.getAttribute('data-mode') === 'document'){
+      requestAnimationFrame(function(){ reflowPage(page); });
+    }
+  }
 
   // Cycle through gemini → gt → diff → gemini (used by the keyboard
   // shortcut). Safe-no-ops on pages without GT.
@@ -4188,6 +4282,7 @@ _JS = r"""
     page.querySelectorAll('.source-toggle button').forEach(function(b){
       b.classList.toggle('active', b.dataset.sourceMode === nxt);
     });
+    reflowForSource(page);
   }
 
   // ============================================================
