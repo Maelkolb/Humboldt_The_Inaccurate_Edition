@@ -89,6 +89,65 @@ def _build_gt_index(
     return idx
 
 
+def _folio_key_variants(label: str) -> List[str]:
+    """Candidate lookup keys for a folio label, most-specific first, so a
+    minor format difference (leading zeros, a stray ``fol.`` prefix) between
+    the image filename and the TEI ``@n`` doesn't lose the match."""
+    key = _norm_folio(label)
+    variants = [key]
+    # Drop a leading "fol."/"f." prefix the TEI sometimes carries.
+    stripped = re.sub(r"^(?:fol\.?|f\.?)\s*", "", key)
+    if stripped and stripped != key:
+        variants.append(stripped)
+    # Tolerate leading zeros: "067r" <-> "67r".
+    m = re.match(r"0*(\d+)([rv]?)$", stripped or key)
+    if m:
+        variants.append(m.group(1) + m.group(2))
+    seen, out = set(), []
+    for v in variants:
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
+def gt_lookup(
+    gt_index: Dict[str, PageResult], folio_label: str
+) -> Optional[PageResult]:
+    """Look up a GT page by folio label, tolerating minor key differences."""
+    for key in _folio_key_variants(folio_label):
+        page = gt_index.get(key)
+        if page is not None:
+            return page
+    return None
+
+
+def _coerce_match_list(parsed: Any) -> List[Any]:
+    """Coerce a parsed LLM response into the list of per-region match objects.
+
+    Gemini usually returns a bare JSON array, but intermittently wraps it in
+    an object (e.g. ``{"regions": [...]}`` / ``{"matches": [...]}``). Treating
+    that as "no matches" is what makes the Ground-Truth / Diff tabs vanish on
+    some pages, so we unwrap it here. Returns the matches list, or ``[]``.
+    """
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, dict):
+        for k in ("matches", "regions", "results", "items", "data",
+                  "ground_truth", "mappings", "output"):
+            v = parsed.get(k)
+            if isinstance(v, list):
+                return v
+        # Any list-of-objects value (first wins).
+        for v in parsed.values():
+            if isinstance(v, list) and (not v or isinstance(v[0], dict)):
+                return v
+        # A single bare match object → wrap it.
+        if "region_index" in parsed:
+            return [parsed]
+    return []
+
+
 def _gt_page_text_for_prompt(gt_page: PageResult) -> str:
     """Render a GT page as a single human-readable block for the prompt.
 
@@ -443,7 +502,7 @@ def match_ground_truth_to_page(
 
     image_bytes, mime_type = _load_image_bytes(image_path)
 
-    data: Any = []
+    data: List[Any] = []
     for attempt in range(1, 3):
         try:
             response = client.models.generate_content(
@@ -463,8 +522,8 @@ def match_ground_truth_to_page(
                     response_mime_type="application/json",
                 ),
             )
-            data = parse_json_robust(response.text)
-            if isinstance(data, list):
+            data = _coerce_match_list(parse_json_robust(response.text))
+            if data:
                 break
         except Exception as exc:
             logger.error(
@@ -472,8 +531,11 @@ def match_ground_truth_to_page(
                 attempt, exc,
             )
 
-    if not isinstance(data, list):
-        data = []
+    if not data:
+        logger.warning(
+            "  GT: model returned no usable matches for this page "
+            "(no Ground-Truth/Diff tabs will appear)."
+        )
 
     # Build {region_index → (content, confidence)}
     match_map: Dict[int, Tuple[str, float]] = {}
@@ -558,12 +620,11 @@ def annotate_results_with_ground_truth(
 
     matched_pages = 0
     for result in results:
-        key = _norm_folio(result.folio_label)
-        gt_page = gt_index.get(key)
+        gt_page = gt_lookup(gt_index, result.folio_label)
         if gt_page is None:
-            logger.debug(
+            logger.info(
                 "No GT folio matches '%s' (norm=%r); skipping",
-                result.folio_label, key,
+                result.folio_label, _norm_folio(result.folio_label),
             )
             continue
 
