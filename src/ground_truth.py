@@ -230,6 +230,63 @@ def _snap_to_canonical(
     return canonical[start:end].strip()
 
 
+def _reflow_to_reference(gt_text: str, ref_text: str) -> str:
+    """Re-insert line breaks into *gt_text* so its lineation mirrors
+    *ref_text* (the pipeline's own transcription, which already follows the
+    manuscript's line breaks).
+
+    Only whitespace is touched: every ground-truth token is preserved
+    verbatim and in its original order — orthography and tokenisation are
+    never changed, just the line wrapping. This produces the line-per-line
+    layout of the original page without altering the text.
+    """
+    if not gt_text or not ref_text or "\n" not in ref_text:
+        return gt_text
+    gt_tokens = gt_text.split()
+    if not gt_tokens:
+        return gt_text
+
+    ref_tokens: List[str] = []
+    ref_line: List[int] = []
+    for li, line in enumerate(ref_text.split("\n")):
+        for tok in line.split():
+            ref_tokens.append(tok)
+            ref_line.append(li)
+    if not ref_tokens:
+        return gt_text
+
+    a = [t.casefold() for t in gt_tokens]
+    b = [t.casefold() for t in ref_tokens]
+    line_of: List[Optional[int]] = [None] * len(gt_tokens)
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+        a=a, b=b, autojunk=False
+    ).get_opcodes():
+        if tag == "equal":
+            for k in range(i2 - i1):
+                line_of[i1 + k] = ref_line[j1 + k]
+        elif tag == "replace":
+            span = max(j2 - j1, 1)
+            for off, k in enumerate(range(i1, i2)):
+                jj = min(j1 + min(off, span - 1), len(ref_line) - 1)
+                line_of[k] = ref_line[jj]
+        # 'delete' (gt tokens with no ref counterpart) and 'insert' fall
+        # through; deleted gt tokens inherit the running line below.
+
+    # Carry the line index forward across any unresolved tokens.
+    cur = 0
+    for k in range(len(gt_tokens)):
+        if line_of[k] is None:
+            line_of[k] = cur
+        else:
+            cur = line_of[k]
+
+    pieces = [gt_tokens[0]]
+    for k in range(1, len(gt_tokens)):
+        pieces.append("\n" if line_of[k] != line_of[k - 1] else " ")
+        pieces.append(gt_tokens[k])
+    return "".join(pieces)
+
+
 # ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
@@ -451,6 +508,10 @@ def match_ground_truth_to_page(
                                r.region_index, exc)
                 snapped = None
             if snapped:
+                # Re-lineate to match the manuscript (the pipeline's own
+                # transcription follows the image line breaks); tokens stay
+                # verbatim — only whitespace changes.
+                snapped = _reflow_to_reference(snapped, r.content or "")
                 out.append(dataclasses.replace(
                     r,
                     ground_truth_content=snapped,
