@@ -30,6 +30,7 @@ from .geo_consistency import validate_locations
 from .ground_truth import (
     _build_gt_index,
     _norm_folio,
+    gt_lookup,
     match_ground_truth_to_page,
 )
 from .tei_writer import write_tei_file
@@ -396,18 +397,23 @@ def process_book(
 
     geo_cache: Dict = {}
     results: List[PageResult] = []
+    gt_folios_unmatched: List[str] = []   # folios with no GT page in the TEI
 
     for idx, image_path in enumerate(tqdm(subset, desc="Folios", unit="fol")):
         page_num = extract_page_number(image_path.name) or (idx + 1)
         # Look up matching GT page (if any) by normalised folio label
         gt_page = None
         if gt_index:
-            folio_key = _norm_folio(extract_folio_label(image_path.name))
-            gt_page = gt_index.get(folio_key)
+            gt_page = gt_lookup(gt_index, extract_folio_label(image_path.name))
             if gt_page is None:
-                logger.debug(
-                    "No GT match for folio %r (key=%r)",
-                    image_path.name, folio_key,
+                gt_folios_unmatched.append(
+                    _norm_folio(extract_folio_label(image_path.name))
+                )
+                logger.info(
+                    "No GT folio in TEI for %s (key=%r) — page will have no "
+                    "Ground-Truth/Diff tabs.",
+                    image_path.name,
+                    _norm_folio(extract_folio_label(image_path.name)),
                 )
         try:
             result = process_page(
@@ -440,6 +446,32 @@ def process_book(
             logger.error("Error processing %s: %s", image_path.name, exc, exc_info=True)
 
     results.sort(key=lambda r: r.page_number)
+
+    # ----- Ground-truth coverage summary (diagnostic) -----
+    if gt_index:
+        with_gt = sum(1 for r in results if r.has_ground_truth)
+        logger.info(
+            "Ground-truth coverage: %d / %d pages show GT/Diff tabs "
+            "(%d folios had no GT page in the TEI%s).",
+            with_gt, len(results), len(gt_folios_unmatched),
+            (": " + ", ".join(gt_folios_unmatched[:12])
+             + ("…" if len(gt_folios_unmatched) > 12 else ""))
+            if gt_folios_unmatched else "",
+        )
+        in_tei_no_gt = [
+            r.folio_label for r in results
+            if not r.has_ground_truth
+            and gt_lookup(gt_index, r.folio_label) is not None
+        ]
+        if in_tei_no_gt:
+            logger.warning(
+                "  %d page(s) HAD a matching TEI folio but produced no GT "
+                "matches (see the per-page 'GT matched' / 'no usable matches' "
+                "logs above): %s",
+                len(in_tei_no_gt),
+                ", ".join(in_tei_no_gt[:12])
+                + ("…" if len(in_tei_no_gt) > 12 else ""),
+            )
 
     # ----- Output: combined JSON -----
     combined_json = output_folder / "digital_edition_complete.json"
