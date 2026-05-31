@@ -504,6 +504,10 @@ def _region_classes(r: Region) -> str:
         cls += " is-margin-top"
     elif mp in ("mBottom", "bottom"):
         cls += " is-margin-bottom"
+    # Regions with no matched ground truth are dimmed in GT/Diff modes so the
+    # source toggle is visibly responsive even on partially-matched pages.
+    if not getattr(r, "ground_truth_content", None):
+        cls += " is-no-gt"
     return cls
 
 
@@ -682,10 +686,12 @@ def _doc_inline_content(
     rtype = region.region_type
 
     if region.is_visual or rtype == "sketch":
+        desc = _render_region_text(region, entities, ec) \
+            if region.content else _render_plain("[sketch]")
         return (
             f'<span class="doc-sketch-desc">'
             f'<span class="doc-sketch-mark" aria-hidden="true">✦</span>'
-            f'{_render_plain(region.content or "[sketch]")}</span>'
+            f'{desc}</span>'
         )
 
     if rtype in ("observation_table", "instrument_list"):
@@ -705,7 +711,7 @@ def _doc_inline_content(
     if rtype == "coordinates":
         return (
             f'<span class="doc-coords">'
-            f'{_render_plain(region.content or "")}</span>'
+            f'{_render_region_text(region, entities, ec)}</span>'
         )
 
     if rtype == "crossed_out":
@@ -2310,6 +2316,17 @@ body::before{
 .page[data-source-mode="gemini"] .region-content.has-gt .rc--gemini{display:inline}
 .page[data-source-mode="gt"]     .region-content.has-gt .rc--gt{display:inline}
 .page[data-source-mode="diff"]   .region-content.has-gt .rc--diff{display:inline}
+
+/* In Ground-Truth / Diff modes, fade regions that have no matched ground
+   truth so the toggle is visibly responsive and it's clear *which* regions
+   are being compared (only matters on pages that actually carry GT). */
+.page[data-has-gt="true"][data-source-mode="gt"]   .doc-slot.is-no-gt,
+.page[data-has-gt="true"][data-source-mode="diff"] .doc-slot.is-no-gt,
+.page[data-has-gt="true"][data-source-mode="gt"]   .r.is-no-gt,
+.page[data-has-gt="true"][data-source-mode="diff"] .r.is-no-gt{
+  opacity:.4;
+  transition:opacity .2s var(--ease);
+}
 
 /* Subtle confidence-attenuation cue (lower opacity for low-confidence GT) */
 .region-content.has-gt[data-gt-confidence="0.00"] .rc--gt,
