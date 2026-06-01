@@ -285,6 +285,19 @@ def _norm_ws(text: str) -> str:
     return _WS_COLLAPSE_RE.sub(" ", (text or "")).strip()
 
 
+# For CER/WER only: drop editorial markup (<u>…</u>, ~~struck~~, [...] / [?])
+# and punctuation so the score reflects the transcription, not the apparatus.
+# The Diff tab does NOT use this — it keeps punctuation and markup as-is.
+_METRIC_MARKUP_RE = re.compile(r"</?u>|~~|\[[^\]]*\]")
+_METRIC_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
+
+
+def _norm_for_metrics(text: str) -> str:
+    t = _METRIC_MARKUP_RE.sub(" ", text or "")
+    t = _METRIC_PUNCT_RE.sub("", t)
+    return _norm_ws(t)
+
+
 def _edit_distance(a: List[str], b: List[str]) -> int:
     """Levenshtein distance over two token sequences (chars or words)."""
     if a == b:
@@ -325,8 +338,8 @@ def _cer_wer_for_main_text(
         gt = r.ground_truth_content
         if not gt:
             continue
-        hyp_parts.append(_norm_ws(r.content or ""))
-        ref_parts.append(_norm_ws(gt))
+        hyp_parts.append(_norm_for_metrics(r.content or ""))
+        ref_parts.append(_norm_for_metrics(gt))
         n += 1
     if n == 0:
         return None
@@ -2816,10 +2829,12 @@ body.view-text .facs-panel{display:none}
 .doc-slot-body{
   height:auto;
   min-height:100%;
-  /* Clipped to the slot as a guard; the JS fit pass sizes the box to the
-     content (growing it when a dense region can't shrink to fit) so visible
-     text is never actually cut off. */
-  overflow:hidden;
+  /* Never clip: the JS fit pass sizes the box to the content (growing it when
+     a dense region can't shrink to fit) and caps the scale so the widest word
+     fits the width; visible + break-word guarantee no character is ever cut
+     off even if a measurement is momentarily stale. */
+  overflow:visible;
+  overflow-wrap:break-word;
   font-family:var(--f-body);
   color:var(--text);
   line-height:1.45;
@@ -3947,6 +3962,18 @@ _JS = r"""
         scale = next;
       }
       s.style.setProperty('--slot-scale', scale.toFixed(3));
+
+      // Cap the scale so the widest word still fits the box width. The
+      // height-fill above can scale a short region up until a long word is
+      // wider than its bbox; without this it would be clipped horizontally.
+      for(var wit = 0; wit < 5; wit++){
+        if(body.scrollWidth <= body.clientWidth + 1 || scale <= MIN_SCALE) break;
+        scale = Math.max(
+          MIN_SCALE,
+          scale * (body.clientWidth / body.scrollWidth) * 0.98
+        );
+        s.style.setProperty('--slot-scale', scale.toFixed(3));
+      }
 
       // If the text still overflows its bbox (dense region clamped at
       // MIN_SCALE), let the box grow so nothing is cut off; otherwise keep
