@@ -17,6 +17,7 @@ from .tei_writer import (
 from .ground_truth import (
     match_ground_truth_to_page,
     annotate_results_with_ground_truth,
+    fill_missing_body_ground_truth,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "write_tei_file",
     "match_ground_truth_to_page",
     "annotate_results_with_ground_truth",
+    "fill_missing_body_ground_truth",
 ]
