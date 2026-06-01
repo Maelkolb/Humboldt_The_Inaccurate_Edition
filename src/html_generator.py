@@ -346,6 +346,9 @@ def _cer_wer_for_main_text(
 _RE_UNDERLINE_CROSS = re.compile(
     r'&lt;u&gt;(.*?)&lt;/u&gt;', re.DOTALL
 )
+_RE_STRUCK_CROSS = re.compile(
+    r'~~(.+?)~~', re.DOTALL
+)
 _RE_UNCERTAIN_AFTER_MARK = re.compile(
     r'(<mark class="ent"[^>]*>.*?</mark>)'
     r'<span class="ed-uncertain-mark"[^>]*>\[\?\]</span>',
@@ -362,6 +365,13 @@ def _postprocess_editorial(html: str) -> str:
     """
     html = _RE_UNDERLINE_CROSS.sub(
         r'<span class="ed-underline" title="Underlined in original">\1</span>',
+        html,
+    )
+    # ~~struck~~ spans that were split across an entity <mark> never matched
+    # in the per-chunk pass; re-join them on the full HTML string so the
+    # Gemini view strikes them through just like the ground-truth view.
+    html = _RE_STRUCK_CROSS.sub(
+        r'<del class="ed-struck" title="Struck through in original">\1</del>',
         html,
     )
     html = _RE_UNCERTAIN_AFTER_MARK.sub(
