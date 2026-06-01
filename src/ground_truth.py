@@ -29,6 +29,7 @@ populated).
 from __future__ import annotations
 
 import base64
+import difflib
 import json
 import logging
 import re
@@ -88,6 +89,65 @@ def _build_gt_index(
     return idx
 
 
+def _folio_key_variants(label: str) -> List[str]:
+    """Candidate lookup keys for a folio label, most-specific first, so a
+    minor format difference (leading zeros, a stray ``fol.`` prefix) between
+    the image filename and the TEI ``@n`` doesn't lose the match."""
+    key = _norm_folio(label)
+    variants = [key]
+    # Drop a leading "fol."/"f." prefix the TEI sometimes carries.
+    stripped = re.sub(r"^(?:fol\.?|f\.?)\s*", "", key)
+    if stripped and stripped != key:
+        variants.append(stripped)
+    # Tolerate leading zeros: "067r" <-> "67r".
+    m = re.match(r"0*(\d+)([rv]?)$", stripped or key)
+    if m:
+        variants.append(m.group(1) + m.group(2))
+    seen, out = set(), []
+    for v in variants:
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out
+
+
+def gt_lookup(
+    gt_index: Dict[str, PageResult], folio_label: str
+) -> Optional[PageResult]:
+    """Look up a GT page by folio label, tolerating minor key differences."""
+    for key in _folio_key_variants(folio_label):
+        page = gt_index.get(key)
+        if page is not None:
+            return page
+    return None
+
+
+def _coerce_match_list(parsed: Any) -> List[Any]:
+    """Coerce a parsed LLM response into the list of per-region match objects.
+
+    Gemini usually returns a bare JSON array, but intermittently wraps it in
+    an object (e.g. ``{"regions": [...]}`` / ``{"matches": [...]}``). Treating
+    that as "no matches" is what makes the Ground-Truth / Diff tabs vanish on
+    some pages, so we unwrap it here. Returns the matches list, or ``[]``.
+    """
+    if isinstance(parsed, list):
+        return parsed
+    if isinstance(parsed, dict):
+        for k in ("matches", "regions", "results", "items", "data",
+                  "ground_truth", "mappings", "output"):
+            v = parsed.get(k)
+            if isinstance(v, list):
+                return v
+        # Any list-of-objects value (first wins).
+        for v in parsed.values():
+            if isinstance(v, list) and (not v or isinstance(v[0], dict)):
+                return v
+        # A single bare match object → wrap it.
+        if "region_index" in parsed:
+            return [parsed]
+    return []
+
+
 def _gt_page_text_for_prompt(gt_page: PageResult) -> str:
     """Render a GT page as a single human-readable block for the prompt.
 
@@ -130,6 +190,311 @@ def _gt_page_text_for_prompt(gt_page: PageResult) -> str:
             parts.append(f"[sketch] {r.content or '[figure]'}")
 
     return "\n\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Verbatim-fidelity guard
+# ---------------------------------------------------------------------------
+# The matching LLM is only ever allowed to *select* which span of the
+# authoritative GT belongs to a region — never to rewrite it. Every value the
+# model returns is therefore snapped back onto a verbatim slice of the GT TEI
+# text before it is stored, so ``ground_truth_content`` is guaranteed to be
+# the original ground truth, character for character.
+
+def _canonical_gt_text(gt_page: PageResult) -> str:
+    """Authoritative, verbatim GT text for a page: the raw region contents
+    (no labels), in document order, joined by newlines. This is the only text
+    a region's ``ground_truth_content`` is ever allowed to be a slice of."""
+    return "\n".join(
+        r.content for r in gt_page.regions if r.content
+    )
+
+
+def _normalize_with_map(s: str) -> Tuple[str, List[int]]:
+    """Return a comparison string plus an index map back to *s*.
+
+    The comparison string is whitespace-collapsed (runs → single space) AND
+    casefolded, so matching is case- and layout-insensitive. ``idx_map[i]`` is
+    the index in *s* that comparison-char ``i`` came from — letting a matched
+    span be sliced verbatim from the original.
+
+    Casefolding can change a character's length (e.g. German ``ß`` → ``ss``),
+    so a single source char may map to several comparison chars; each of them
+    points back to that one source index. Building the map here (rather than
+    casefolding afterwards) keeps positions and the map exactly aligned.
+    """
+    chars: List[str] = []
+    idx_map: List[int] = []
+    prev_ws = False
+    for i, ch in enumerate(s):
+        if ch.isspace():
+            if prev_ws:
+                continue
+            chars.append(" ")
+            idx_map.append(i)
+            prev_ws = True
+        else:
+            for fc in ch.casefold():
+                chars.append(fc)
+                idx_map.append(i)
+            prev_ws = False
+    return "".join(chars), idx_map
+
+
+def _snap_to_canonical(
+    candidate: str,
+    canonical: str,
+    *,
+    min_ratio: float = 0.62,
+) -> Optional[str]:
+    """Return the verbatim slice of *canonical* that the model's *candidate*
+    corresponds to, or ``None`` when no faithful match exists.
+
+    Matching is whitespace- and case-insensitive (so the model may reflow
+    line breaks or letter case freely), but the returned text is always cut
+    verbatim from *canonical* — the model can never introduce a character
+    that is not in the original ground truth.
+    """
+    cand = (candidate or "").strip()
+    if not cand or not canonical:
+        return None
+
+    cn_cmp, _ = _normalize_with_map(cand)        # casefolded candidate
+    norm_cmp, idx = _normalize_with_map(canonical)  # casefolded canonical + map
+    if not cn_cmp or not norm_cmp:
+        return None
+
+    last = len(idx) - 1
+
+    # 1) Exact (whitespace/case-insensitive) substring → slice verbatim.
+    pos = norm_cmp.find(cn_cmp)
+    if pos >= 0:
+        start = idx[pos]
+        end = idx[min(pos + len(cn_cmp) - 1, last)] + 1
+        return canonical[start:end].strip()
+
+    # 2) Fuzzy: span from the first to the last matching block, accepted
+    #    only when it actually resembles the candidate.
+    sm = difflib.SequenceMatcher(a=norm_cmp, b=cn_cmp, autojunk=False)
+    blocks = [b for b in sm.get_matching_blocks() if b.size > 0]
+    if not blocks:
+        return None
+    a_start = blocks[0].a
+    a_end = blocks[-1].a + blocks[-1].size
+    span_cmp = norm_cmp[a_start:a_end]
+    if difflib.SequenceMatcher(a=span_cmp, b=cn_cmp).ratio() < min_ratio:
+        return None
+    start = idx[a_start]
+    end = idx[min(a_end - 1, last)] + 1
+    return canonical[start:end].strip()
+
+
+def _reflow_to_reference(gt_text: str, ref_text: str) -> str:
+    """Re-insert line breaks into *gt_text* so its lineation mirrors
+    *ref_text* (the pipeline's own transcription, which already follows the
+    manuscript's line breaks).
+
+    Only whitespace is touched: every ground-truth token is preserved
+    verbatim and in its original order — orthography and tokenisation are
+    never changed, just the line wrapping. This produces the line-per-line
+    layout of the original page without altering the text.
+    """
+    if not gt_text or not ref_text or "\n" not in ref_text:
+        return gt_text
+    gt_tokens = gt_text.split()
+    if not gt_tokens:
+        return gt_text
+
+    ref_tokens: List[str] = []
+    ref_line: List[int] = []
+    for li, line in enumerate(ref_text.split("\n")):
+        for tok in line.split():
+            ref_tokens.append(tok)
+            ref_line.append(li)
+    if not ref_tokens:
+        return gt_text
+
+    a = [t.casefold() for t in gt_tokens]
+    b = [t.casefold() for t in ref_tokens]
+    line_of: List[Optional[int]] = [None] * len(gt_tokens)
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+        a=a, b=b, autojunk=False
+    ).get_opcodes():
+        if tag == "equal":
+            for k in range(i2 - i1):
+                line_of[i1 + k] = ref_line[j1 + k]
+        elif tag == "replace":
+            span = max(j2 - j1, 1)
+            for off, k in enumerate(range(i1, i2)):
+                jj = min(j1 + min(off, span - 1), len(ref_line) - 1)
+                line_of[k] = ref_line[jj]
+        # 'delete' (gt tokens with no ref counterpart) and 'insert' fall
+        # through; deleted gt tokens inherit the running line below.
+
+    # Carry the line index forward across any unresolved tokens.
+    cur = 0
+    for k in range(len(gt_tokens)):
+        if line_of[k] is None:
+            line_of[k] = cur
+        else:
+            cur = line_of[k]
+
+    pieces = [gt_tokens[0]]
+    for k in range(1, len(gt_tokens)):
+        pieces.append("\n" if line_of[k] != line_of[k - 1] else " ")
+        pieces.append(gt_tokens[k])
+    return "".join(pieces)
+
+
+# ---------------------------------------------------------------------------
+# Deterministic body fallback
+# ---------------------------------------------------------------------------
+# The LLM matcher occasionally returns nothing for the main body on pages
+# where the pipeline's transcription is badly garbled — it can't confidently
+# align Gemini→GT. But the ground truth IS in the TEI, so rather than lose it
+# we cut the GT main-text deterministically and assign it to the detected
+# main_text regions by token alignment. No model call, always available.
+
+_NONWS_RE = re.compile(r"\S+")
+# Strip inline markup / editorial markers / surrounding punctuation so tokens
+# align by their letters (e.g. "<u>Wiltshire</u>" ↔ "Wiltshire", "giebt," ↔
+# "giebt", "[?]" → "").
+_TOK_STRIP_RE = re.compile(
+    r"<[^>]+>|~~|\[[^\]]*\]|[\u2018\u2019\u201c\u201d\"'().,;:!?»«]"
+)
+
+
+def _norm_tok(word: str) -> str:
+    return _TOK_STRIP_RE.sub("", word).casefold()
+
+
+def _split_gt_main_text(
+    gemini_segments: List[str], gt_text: str
+) -> List[str]:
+    """Distribute *gt_text* across the detected text regions so that the GT is
+    tiled completely, in reading order, with no gaps. Each region is anchored
+    to where its content matches inside the GT; regions that can't be anchored
+    (markup-only, badly garbled, or finer-grained than the GT) are placed by
+    interpolation between their neighbours, so every region receives a verbatim
+    slice and no GT text is dropped.
+    """
+    gt_toks = [(m.group(), m.start(), m.end())
+               for m in _NONWS_RE.finditer(gt_text)]
+    n = len(gemini_segments)
+    W = len(gt_toks)
+    if W == 0:
+        return ["" for _ in range(n)]
+    if n <= 1:
+        return [gt_text.strip()]
+
+    gt_words = [_norm_tok(t[0]) for t in gt_toks]
+    flat, seg_of = [], []
+    for si, seg in enumerate(gemini_segments):
+        for w in (seg or "").split():
+            nw = _norm_tok(w)
+            if nw:
+                flat.append(nw)
+                seg_of.append(si)
+
+    anchors: List[Optional[int]] = [None] * n
+    for a, b, size in difflib.SequenceMatcher(
+        a=flat, b=gt_words, autojunk=False
+    ).get_matching_blocks():
+        for k in range(size):
+            si = seg_of[a + k]
+            if anchors[si] is None:
+                anchors[si] = b + k
+
+    # Monotonic start indices: honour anchors that don't go backwards, clamp
+    # the rest (they'll be spread out by interpolation below).
+    starts = [0] * n
+    for i in range(1, n):
+        a = anchors[i]
+        starts[i] = a if (a is not None and a >= starts[i - 1]) else starts[i - 1]
+
+    # Spread any run of equal starts evenly across the gap to the next distinct
+    # boundary, so clamped/unanchored regions still get their share of the GT.
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and starts[j + 1] == starts[i]:
+            j += 1
+        if j > i:
+            lo = starts[i]
+            hi = starts[j + 1] if j + 1 < n else W
+            span = max(hi - lo, 0)
+            cnt = j - i + 1
+            for k in range(cnt):
+                starts[i + k] = lo + (span * k) // cnt
+        i = j + 1
+
+    slices = ["" for _ in range(n)]
+    for i in range(n):
+        s = starts[i]
+        e = starts[i + 1] if i + 1 < n else W
+        if s < W and e > s:
+            slices[i] = gt_text[gt_toks[s][1]:gt_toks[e - 1][2]].strip()
+    return slices
+
+
+# Text-bearing region types whose ground truth lives in the TEI as prose and
+# can be aligned by content. (Sketches, tables, calculations and instrument
+# lists are structural, not free prose, so they're handled by the matcher only.)
+_GT_TEXT_TYPES = (
+    "page_number", "entry_heading", "main_text", "marginal_note",
+    "pasted_slip", "bibliographic_ref", "coordinates", "catch_phrase",
+)
+
+
+def _fill_unmatched_gt(
+    regions: List[Region], gt_page: PageResult
+) -> List[Region]:
+    """Deterministic fill: assign ground truth to every detected text region
+    the matcher left empty by aligning the *full* manuscript ground truth for
+    the folio (body + manuscript marginal notes + headings + …, in document
+    order) across the detected text regions and cutting verbatim slices.
+
+    Because the source is the whole manuscript GT pool — not just the body —
+    a region Gemini misclassified by type (e.g. a marginal note detected as
+    main_text) still receives the correct GT content. Regions the matcher
+    already populated are never overruled.
+    """
+    import dataclasses
+
+    det = [(i, r) for i, r in enumerate(regions)
+           if r.region_type in _GT_TEXT_TYPES]
+    if not det:
+        return regions
+    missing = {i for i, r in det if not r.ground_truth_content}
+    if not missing:
+        return regions
+
+    gt_text = "\n".join(
+        r.content for r in gt_page.regions
+        if r.region_type in _GT_TEXT_TYPES and r.content
+    ).strip()
+    if not gt_text:
+        return regions
+
+    segments = [r.content or "" for _, r in det]
+    slices = _split_gt_main_text(segments, gt_text)
+
+    out = list(regions)
+    assigned = 0
+    for (i, r), sl in zip(det, slices):
+        if i not in missing or not sl:
+            continue
+        out[i] = dataclasses.replace(
+            out[i],
+            ground_truth_content=_reflow_to_reference(sl, r.content or ""),
+            ground_truth_confidence=0.5,   # deterministic, not model-scored
+        )
+        assigned += 1
+    if assigned:
+        logger.info(
+            "  GT filled deterministically from TEI (%d region(s)).", assigned,
+        )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -182,36 +547,32 @@ Rules for matching:
   * If the GT contains text not covered by any detected region, that's OK —
     do not invent a region for it.
 
-TEXT FIDELITY RULES (IMPORTANT)
--------------------------------
+TEXT FIDELITY RULES (CRITICAL)
+------------------------------
 
-The ground-truth text you produce must contain ONLY what is actually written
-on the page — no editorial additions:
+You may ONLY SELECT text from the ground truth — you may NOT rewrite it. The
+``ground_truth_content`` you return for a region must be copied VERBATIM from
+the "GROUND-TRUTH TEXT FOR THIS PAGE" block:
 
-  * Use the original spellings and abbreviations exactly as written.
-    NEVER substitute expanded forms of abbreviations (e.g. keep "St.",
-    "z.B.", "Hr." — do NOT write "Sankt", "zum Beispiel", "Herr").
-  * Do NOT modernise spellings.
-  * Keep editorial markers that were already produced upstream
-    (``[?]`` for uncertain words, ``[...]`` for gaps, ``~~text~~`` for
-    struck-through text, ``<u>text</u>`` for underlines). These mark
-    things visible on the page; don't strip them.
-  * Do NOT add any commentary, footnote references, or square-bracket
-    editorial supply that isn't already in the input GT text.
-  * If the input GT text for a segment contains an expanded abbreviation
-    that you can see was abbreviated in the manuscript image, replace it
-    with the abbreviated form as it actually appears on the page.
+  * Copy the characters exactly: same spelling, same abbreviations, same
+    punctuation, same editorial markers (``[?]``, ``[...]``, ``~~…~~``,
+    ``<u>…</u>``). Do NOT expand or contract abbreviations, do NOT modernise
+    spelling, do NOT add or remove anything.
+  * Do NOT add commentary, footnote references, or bracketed editorial supply
+    that is not already present in the GT text.
+  * Your only freedom is WHICH contiguous span of the GT text to assign to
+    each region (and you may leave whitespace/line breaks as they are — they
+    are ignored when the selection is validated).
+
+The returned text is automatically snapped back onto the original ground
+truth, so any wording you invent that is not present verbatim in the GT will
+be discarded.
 
 LINE-BREAK FORMATTING
 ---------------------
 
-Format each matched GT segment so its line breaks (``\\n``) match the line
-breaks the manuscript shows in that region — i.e., word-by-word, line-by-line,
-just like the pipeline's own transcription does. Use the image as the
-authority for where line breaks fall. The input GT text already contains
-newlines from its TEI ``<lb/>`` markers; honour those, but feel free to
-correct them when the image clearly shows a different lineation than what
-the GT TEI encoded.
+Keep the ground-truth text's own line breaks. Do not re-lineate it to match
+the manuscript; line breaks are not used when validating your selection.
 
 OUTPUT FORMAT
 -------------
@@ -286,12 +647,13 @@ def match_ground_truth_to_page(
     ]
     regions_json = json.dumps(serialised, ensure_ascii=False, indent=2)
     gt_text = _gt_page_text_for_prompt(gt_page)
+    canonical_gt = _canonical_gt_text(gt_page)
 
     prompt = _PROMPT.format(regions_json=regions_json, gt_text=gt_text)
 
     image_bytes, mime_type = _load_image_bytes(image_path)
 
-    data: Any = []
+    data: List[Any] = []
     for attempt in range(1, 3):
         try:
             response = client.models.generate_content(
@@ -311,8 +673,8 @@ def match_ground_truth_to_page(
                     response_mime_type="application/json",
                 ),
             )
-            data = parse_json_robust(response.text)
-            if isinstance(data, list):
+            data = _coerce_match_list(parse_json_robust(response.text))
+            if data:
                 break
         except Exception as exc:
             logger.error(
@@ -320,8 +682,11 @@ def match_ground_truth_to_page(
                 attempt, exc,
             )
 
-    if not isinstance(data, list):
-        data = []
+    if not data:
+        logger.warning(
+            "  GT: model returned no usable matches for this page "
+            "(no Ground-Truth/Diff tabs will appear)."
+        )
 
     # Build {region_index → (content, confidence)}
     match_map: Dict[int, Tuple[str, float]] = {}
@@ -339,26 +704,50 @@ def match_ground_truth_to_page(
             conf = 0.0
         match_map[idx] = (str(gt), conf)
 
-    # Apply matches
+    # Apply matches. Every returned segment is snapped back to a verbatim
+    # slice of the page's canonical GT text; a model rewrite that is not
+    # present in the GT is rejected (stored as empty) rather than persisted.
     import dataclasses
     out: List[Region] = []
     matched_count = 0
+    rejected_count = 0
     for r in regions:
         if r.region_index in match_map:
-            gt_text_match, conf = match_map[r.region_index]
-            out.append(dataclasses.replace(
-                r,
-                ground_truth_content=gt_text_match,
-                ground_truth_confidence=conf,
-            ))
-            if gt_text_match:
+            raw_gt, conf = match_map[r.region_index]
+            try:
+                snapped = _snap_to_canonical(raw_gt, canonical_gt) if raw_gt else None
+            except Exception as exc:  # never let GT matching abort a page
+                logger.warning("  GT snap failed for region %s: %s",
+                               r.region_index, exc)
+                snapped = None
+            if snapped:
+                # Re-lineate to match the manuscript (the pipeline's own
+                # transcription follows the image line breaks); tokens stay
+                # verbatim — only whitespace changes.
+                snapped = _reflow_to_reference(snapped, r.content or "")
+                out.append(dataclasses.replace(
+                    r,
+                    ground_truth_content=snapped,
+                    ground_truth_confidence=conf,
+                ))
                 matched_count += 1
+            else:
+                if raw_gt:
+                    rejected_count += 1
+                out.append(dataclasses.replace(
+                    r,
+                    ground_truth_content="",
+                    ground_truth_confidence=0.0,
+                ))
         else:
             out.append(r)
     logger.info(
-        "  GT matched: %d / %d regions populated",
-        matched_count, len(regions),
+        "  GT matched: %d / %d regions populated (%d rejected as non-verbatim)",
+        matched_count, len(regions), rejected_count,
     )
+    # Deterministic safety net for the main body (handles pages where the
+    # matcher couldn't align a badly-garbled transcription to the GT).
+    out = _fill_unmatched_gt(out, gt_page)
     return out
 
 
@@ -385,12 +774,11 @@ def annotate_results_with_ground_truth(
 
     matched_pages = 0
     for result in results:
-        key = _norm_folio(result.folio_label)
-        gt_page = gt_index.get(key)
+        gt_page = gt_lookup(gt_index, result.folio_label)
         if gt_page is None:
-            logger.debug(
+            logger.info(
                 "No GT folio matches '%s' (norm=%r); skipping",
-                result.folio_label, key,
+                result.folio_label, _norm_folio(result.folio_label),
             )
             continue
 
@@ -415,5 +803,34 @@ def annotate_results_with_ground_truth(
     logger.info(
         "Ground-truth matching complete: %d / %d pages matched.",
         matched_pages, len(results),
+    )
+    return results
+
+
+def fill_missing_body_ground_truth(
+    results: List[PageResult],
+    gt_tei: str | Path,
+) -> List[PageResult]:
+    """Offline (no model calls): fill the ground truth on any detected text
+    region the matcher left empty, by cutting it deterministically from the GT
+    TEI. Regions that already have GT are left untouched. Useful for repairing
+    an existing run without re-processing.
+    """
+    gt_index = _build_gt_index(gt_tei)
+    pages_fixed = 0
+    regions_filled = 0
+    for result in results:
+        gt_page = gt_lookup(gt_index, result.folio_label)
+        if gt_page is None:
+            continue
+        before = sum(1 for r in result.regions if r.ground_truth_content)
+        result.regions = _fill_unmatched_gt(result.regions, gt_page)
+        gained = sum(1 for r in result.regions if r.ground_truth_content) - before
+        if gained > 0:
+            pages_fixed += 1
+            regions_filled += gained
+    logger.info(
+        "Deterministic GT fill: %d region(s) across %d page(s) filled "
+        "from the TEI.", regions_filled, pages_fixed,
     )
     return results
