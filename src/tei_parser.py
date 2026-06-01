@@ -125,6 +125,15 @@ def _extract_text(elem, skip_notes: bool = True) -> str:
                 parts.append(node.tail)
             return
 
+        # Editorial apparatus (e.g. <note type="editorial">) can be nested
+        # inside a manuscript note; it is commentary *about* the manuscript,
+        # never part of its transcription, so drop it wherever it appears
+        # (even when skip_notes is False for the surrounding note).
+        if node.get("type") == "editorial":
+            if node.tail:
+                parts.append(node.tail)
+            return
+
         if local == "note" and skip_notes:
             if node.tail:
                 parts.append(node.tail)
