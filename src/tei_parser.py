@@ -524,6 +524,11 @@ def _build_page_regions(page_data: Dict[str, Any], page_idx: int) -> List[Region
 
     # 3) Marginal notes and pasted slips
     for note_elem in page_data["notes"]:
+        # Skip the edition's scholarly apparatus (type="editorial"): it is
+        # commentary *about* the manuscript, not a transcription of it, so it
+        # must never become part of the ground-truth text.
+        if note_elem.get("type") == "editorial":
+            continue
         place = note_elem.get("place", "inline")
         rend = note_elem.get("rend", "")
         xml_id = note_elem.get(f"{XML}id") or note_elem.get("id")

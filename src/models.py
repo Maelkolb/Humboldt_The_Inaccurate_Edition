@@ -173,6 +173,9 @@ class PageResult:
     # Together with each Region's ``content_pre_consistency`` snapshot, this
     # makes the QA pass fully auditable from the JSON output.
     consistency_issues: List[Dict[str, Any]] = field(default_factory=list)
+    # Geolocation validation report (Step 4.5). One verdict dict per resolved
+    # location: {"name", "verdict": "valid"|"invalid", "confidence", "reason"}.
+    geo_validation: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
     def has_ground_truth(self) -> bool:
@@ -198,6 +201,8 @@ class PageResult:
         }
         if self.consistency_issues:
             d["consistency_issues"] = self.consistency_issues
+        if self.geo_validation:
+            d["geo_validation"] = self.geo_validation
         return d
 
     @classmethod
@@ -240,4 +245,5 @@ class PageResult:
             entry_numbers=d.get("entry_numbers", []),
             page_languages=d.get("page_languages", []),
             consistency_issues=d.get("consistency_issues", []),
+            geo_validation=d.get("geo_validation", []),
         )

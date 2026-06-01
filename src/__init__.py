@@ -7,6 +7,7 @@ from .region_detection import detect_regions
 from .transcription import transcribe_regions
 from .consistency_check import check_and_fix_regions
 from .ner import perform_ner
+from .geo_consistency import validate_locations
 from .tei_parser import parse_tei_file, parse_tei_string
 from .tei_writer import (
     results_to_tei_document,
@@ -33,6 +34,7 @@ __all__ = [
     "transcribe_regions",
     "check_and_fix_regions",
     "perform_ner",
+    "validate_locations",
     "parse_tei_file",
     "parse_tei_string",
     "results_to_tei_document",
