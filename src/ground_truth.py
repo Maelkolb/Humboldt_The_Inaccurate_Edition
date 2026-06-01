@@ -356,30 +356,47 @@ def _reflow_to_reference(gt_text: str, ref_text: str) -> str:
 # main_text regions by token alignment. No model call, always available.
 
 _NONWS_RE = re.compile(r"\S+")
+# Strip inline markup / editorial markers / surrounding punctuation so tokens
+# align by their letters (e.g. "<u>Wiltshire</u>" ↔ "Wiltshire", "giebt," ↔
+# "giebt", "[?]" → "").
+_TOK_STRIP_RE = re.compile(
+    r"<[^>]+>|~~|\[[^\]]*\]|[\u2018\u2019\u201c\u201d\"'().,;:!?»«]"
+)
+
+
+def _norm_tok(word: str) -> str:
+    return _TOK_STRIP_RE.sub("", word).casefold()
 
 
 def _split_gt_main_text(
     gemini_segments: List[str], gt_text: str
 ) -> List[str]:
-    """Split *gt_text* across the detected main_text regions, aligning by
-    content. Returns one verbatim slice per segment (in order); a segment with
-    no alignment anchor gets ``""`` rather than mismatched text.
+    """Distribute *gt_text* across the detected text regions so that the GT is
+    tiled completely, in reading order, with no gaps. Each region is anchored
+    to where its content matches inside the GT; regions that can't be anchored
+    (markup-only, badly garbled, or finer-grained than the GT) are placed by
+    interpolation between their neighbours, so every region receives a verbatim
+    slice and no GT text is dropped.
     """
     gt_toks = [(m.group(), m.start(), m.end())
                for m in _NONWS_RE.finditer(gt_text)]
-    if not gt_toks:
-        return ["" for _ in gemini_segments]
-    if len(gemini_segments) <= 1:
+    n = len(gemini_segments)
+    W = len(gt_toks)
+    if W == 0:
+        return ["" for _ in range(n)]
+    if n <= 1:
         return [gt_text.strip()]
 
-    gt_words = [t[0].casefold() for t in gt_toks]
+    gt_words = [_norm_tok(t[0]) for t in gt_toks]
     flat, seg_of = [], []
     for si, seg in enumerate(gemini_segments):
         for w in (seg or "").split():
-            flat.append(w.casefold())
-            seg_of.append(si)
+            nw = _norm_tok(w)
+            if nw:
+                flat.append(nw)
+                seg_of.append(si)
 
-    anchors: List[Optional[int]] = [None] * len(gemini_segments)
+    anchors: List[Optional[int]] = [None] * n
     for a, b, size in difflib.SequenceMatcher(
         a=flat, b=gt_words, autojunk=False
     ).get_matching_blocks():
@@ -388,69 +405,94 @@ def _split_gt_main_text(
             if anchors[si] is None:
                 anchors[si] = b + k
 
-    # Cut points: segment 0 always starts at 0; later segments start at their
-    # first (monotonically increasing) anchor. Unanchored segments get "".
-    cuts: List[Tuple[int, int]] = [(0, 0)]
-    last = 0
-    for i in range(1, len(gemini_segments)):
+    # Monotonic start indices: honour anchors that don't go backwards, clamp
+    # the rest (they'll be spread out by interpolation below).
+    starts = [0] * n
+    for i in range(1, n):
         a = anchors[i]
-        if a is not None and a > last:
-            cuts.append((i, a))
-            last = a
+        starts[i] = a if (a is not None and a >= starts[i - 1]) else starts[i - 1]
 
-    slices = ["" for _ in gemini_segments]
-    for k, (seg, start) in enumerate(cuts):
-        end_word = cuts[k + 1][1] if k + 1 < len(cuts) else len(gt_toks)
-        if start >= len(gt_toks) or end_word <= start:
-            continue
-        c0 = gt_toks[start][1]
-        c1 = gt_toks[end_word - 1][2]
-        slices[seg] = gt_text[c0:c1].strip()
+    # Spread any run of equal starts evenly across the gap to the next distinct
+    # boundary, so clamped/unanchored regions still get their share of the GT.
+    i = 0
+    while i < n:
+        j = i
+        while j + 1 < n and starts[j + 1] == starts[i]:
+            j += 1
+        if j > i:
+            lo = starts[i]
+            hi = starts[j + 1] if j + 1 < n else W
+            span = max(hi - lo, 0)
+            cnt = j - i + 1
+            for k in range(cnt):
+                starts[i + k] = lo + (span * k) // cnt
+        i = j + 1
+
+    slices = ["" for _ in range(n)]
+    for i in range(n):
+        s = starts[i]
+        e = starts[i + 1] if i + 1 < n else W
+        if s < W and e > s:
+            slices[i] = gt_text[gt_toks[s][1]:gt_toks[e - 1][2]].strip()
     return slices
 
 
-def _ensure_body_gt(
+# Text-bearing region types whose ground truth lives in the TEI as prose and
+# can be aligned by content. (Sketches, tables, calculations and instrument
+# lists are structural, not free prose, so they're handled by the matcher only.)
+_GT_TEXT_TYPES = (
+    "page_number", "entry_heading", "main_text", "marginal_note",
+    "pasted_slip", "bibliographic_ref", "coordinates", "catch_phrase",
+)
+
+
+def _fill_unmatched_gt(
     regions: List[Region], gt_page: PageResult
 ) -> List[Region]:
-    """Deterministic safety net: if the detected ``main_text`` regions came
-    back with no ground truth, cut the GT main-text from the TEI and assign it
-    to them directly (re-lineated to the manuscript). Other regions and any
-    GT the matcher already produced are left untouched.
+    """Deterministic fill: assign ground truth to every detected text region
+    the matcher left empty by aligning the *full* manuscript ground truth for
+    the folio (body + manuscript marginal notes + headings + …, in document
+    order) across the detected text regions and cutting verbatim slices.
+
+    Because the source is the whole manuscript GT pool — not just the body —
+    a region Gemini misclassified by type (e.g. a marginal note detected as
+    main_text) still receives the correct GT content. Regions the matcher
+    already populated are never overruled.
     """
     import dataclasses
 
-    body_idx = [i for i, r in enumerate(regions)
-                if r.region_type == "main_text"]
-    if not body_idx:
+    det = [(i, r) for i, r in enumerate(regions)
+           if r.region_type in _GT_TEXT_TYPES]
+    if not det:
         return regions
-    if any(regions[i].ground_truth_content for i in body_idx):
-        return regions  # matcher already populated the body — leave it
+    missing = {i for i, r in det if not r.ground_truth_content}
+    if not missing:
+        return regions
 
-    gt_main = "\n".join(
+    gt_text = "\n".join(
         r.content for r in gt_page.regions
-        if r.region_type == "main_text" and r.content
+        if r.region_type in _GT_TEXT_TYPES and r.content
     ).strip()
-    if not gt_main:
+    if not gt_text:
         return regions
 
-    segments = [regions[i].content or "" for i in body_idx]
-    slices = _split_gt_main_text(segments, gt_main)
+    segments = [r.content or "" for _, r in det]
+    slices = _split_gt_main_text(segments, gt_text)
 
     out = list(regions)
     assigned = 0
-    for i, sl in zip(body_idx, slices):
-        if not sl:
+    for (i, r), sl in zip(det, slices):
+        if i not in missing or not sl:
             continue
         out[i] = dataclasses.replace(
             out[i],
-            ground_truth_content=_reflow_to_reference(sl, out[i].content or ""),
+            ground_truth_content=_reflow_to_reference(sl, r.content or ""),
             ground_truth_confidence=0.5,   # deterministic, not model-scored
         )
         assigned += 1
     if assigned:
         logger.info(
-            "  GT body filled deterministically from TEI "
-            "(%d/%d main_text regions).", assigned, len(body_idx),
+            "  GT filled deterministically from TEI (%d region(s)).", assigned,
         )
     return out
 
@@ -705,7 +747,7 @@ def match_ground_truth_to_page(
     )
     # Deterministic safety net for the main body (handles pages where the
     # matcher couldn't align a badly-garbled transcription to the GT).
-    out = _ensure_body_gt(out, gt_page)
+    out = _fill_unmatched_gt(out, gt_page)
     return out
 
 
@@ -769,29 +811,26 @@ def fill_missing_body_ground_truth(
     results: List[PageResult],
     gt_tei: str | Path,
 ) -> List[PageResult]:
-    """Offline (no model calls): fill the main-text ground truth on any page
-    whose body came back empty, by cutting it deterministically from the GT
-    TEI. Pages whose body already has GT — and all non-body regions — are left
-    untouched. Useful for repairing an existing run without re-processing.
+    """Offline (no model calls): fill the ground truth on any detected text
+    region the matcher left empty, by cutting it deterministically from the GT
+    TEI. Regions that already have GT are left untouched. Useful for repairing
+    an existing run without re-processing.
     """
     gt_index = _build_gt_index(gt_tei)
-    filled = 0
+    pages_fixed = 0
+    regions_filled = 0
     for result in results:
         gt_page = gt_lookup(gt_index, result.folio_label)
         if gt_page is None:
             continue
-        before = any(
-            r.region_type == "main_text" and r.ground_truth_content
-            for r in result.regions
-        )
-        result.regions = _ensure_body_gt(result.regions, gt_page)
-        after = any(
-            r.region_type == "main_text" and r.ground_truth_content
-            for r in result.regions
-        )
-        if after and not before:
-            filled += 1
+        before = sum(1 for r in result.regions if r.ground_truth_content)
+        result.regions = _fill_unmatched_gt(result.regions, gt_page)
+        gained = sum(1 for r in result.regions if r.ground_truth_content) - before
+        if gained > 0:
+            pages_fixed += 1
+            regions_filled += gained
     logger.info(
-        "Filled missing body ground truth on %d page(s) from the TEI.", filled
+        "Deterministic GT fill: %d region(s) across %d page(s) filled "
+        "from the TEI.", regions_filled, pages_fixed,
     )
     return results
