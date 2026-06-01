@@ -371,12 +371,15 @@ def _norm_tok(word: str) -> str:
 def _split_gt_main_text(
     gemini_segments: List[str], gt_text: str
 ) -> List[str]:
-    """Distribute *gt_text* across the detected text regions so that the GT is
-    tiled completely, in reading order, with no gaps. Each region is anchored
-    to where its content matches inside the GT; regions that can't be anchored
-    (markup-only, badly garbled, or finer-grained than the GT) are placed by
-    interpolation between their neighbours, so every region receives a verbatim
-    slice and no GT text is dropped.
+    """Distribute *gt_text* across the detected text regions by matching each
+    region to the GT span its *own content* aligns with — not by position.
+
+    Each region is given the verbatim GT between its anchor and the next
+    region's anchor (so contiguous GT isn't dropped), but only if its content
+    genuinely overlaps that span. A region whose text does not confidently
+    match any GT — an overlapping or misclassified region, or text belonging to
+    another folio — is left empty rather than handed unrelated GT. Wrong ground
+    truth is worse than none.
     """
     gt_toks = [(m.group(), m.start(), m.end())
                for m in _NONWS_RE.finditer(gt_text)]
@@ -388,52 +391,52 @@ def _split_gt_main_text(
         return [gt_text.strip()]
 
     gt_words = [_norm_tok(t[0]) for t in gt_toks]
-    flat, seg_of = [], []
+    flat, seg_of, seg_len = [], [], [0] * n
     for si, seg in enumerate(gemini_segments):
         for w in (seg or "").split():
             nw = _norm_tok(w)
             if nw:
                 flat.append(nw)
                 seg_of.append(si)
+                seg_len[si] += 1
 
-    anchors: List[Optional[int]] = [None] * n
+    matched: List[List[int]] = [[] for _ in range(n)]
     for a, b, size in difflib.SequenceMatcher(
         a=flat, b=gt_words, autojunk=False
     ).get_matching_blocks():
         for k in range(size):
-            si = seg_of[a + k]
-            if anchors[si] is None:
-                anchors[si] = b + k
+            matched[seg_of[a + k]].append(b + k)
 
-    # Monotonic start indices: honour anchors that don't go backwards, clamp
-    # the rest (they'll be spread out by interpolation below).
-    starts = [0] * n
-    for i in range(1, n):
-        a = anchors[i]
-        starts[i] = a if (a is not None and a >= starts[i - 1]) else starts[i - 1]
+    # Accept a region only when enough of its own words land in the GT — this
+    # is what stops an overlapping region from grabbing unrelated GT.
+    cand = []  # [gt_start, region_index, strength]
+    for si in range(n):
+        m = matched[si]
+        if not m:
+            continue
+        strength = len(m)
+        ratio = strength / max(seg_len[si], 1)
+        if ratio < 0.34 and strength < 4:
+            continue
+        cand.append([min(m), si, strength])
+    if not cand:
+        return ["" for _ in range(n)]
 
-    # Spread any run of equal starts evenly across the gap to the next distinct
-    # boundary, so clamped/unanchored regions still get their share of the GT.
-    i = 0
-    while i < n:
-        j = i
-        while j + 1 < n and starts[j + 1] == starts[i]:
-            j += 1
-        if j > i:
-            lo = starts[i]
-            hi = starts[j + 1] if j + 1 < n else W
-            span = max(hi - lo, 0)
-            cnt = j - i + 1
-            for k in range(cnt):
-                starts[i + k] = lo + (span * k) // cnt
-        i = j + 1
+    # Order by GT position; keep strictly-increasing anchors (drop a weaker
+    # region that would start at/behind an already-placed one).
+    cand.sort(key=lambda c: (c[0], -c[2]))
+    tiled = []
+    for c in cand:
+        if tiled and c[0] <= tiled[-1][0]:
+            continue
+        tiled.append(c)
 
     slices = ["" for _ in range(n)]
-    for i in range(n):
-        s = starts[i]
-        e = starts[i + 1] if i + 1 < n else W
-        if s < W and e > s:
-            slices[i] = gt_text[gt_toks[s][1]:gt_toks[e - 1][2]].strip()
+    for idx, (start, si, _strength) in enumerate(tiled):
+        end = tiled[idx + 1][0] if idx + 1 < len(tiled) else W
+        if start >= W or end <= start:
+            continue
+        slices[si] = gt_text[gt_toks[start][1]:gt_toks[end - 1][2]].strip()
     return slices
 
 
