@@ -652,7 +652,7 @@ def _render_region(
             f'{note}{close_tag}'
         )
 
-    # default: main_text, bibliographic_ref, page_number, catch_phrase, etc.
+    # default: main_text, bibliographic_ref, page_number, etc.
     annotated = _render_region_text(region, entities, ec)
     return f'{open_tag}{meta}<p class="r-text">{annotated}</p>{note}{close_tag}'
 
@@ -1002,7 +1002,7 @@ def _plain_text_from_regions(regions: List[Region]) -> str:
         elif r.region_type == "marginal_note":
             mp = getattr(r, "marginal_position", "") or ""
             out.append(f"[margin {mp}] {text}")
-        elif r.region_type in ("page_number", "catch_phrase"):
+        elif r.region_type in ("page_number"):
             out.append(f"[{r.region_type}] {text}")
         else:
             out.append(text)
@@ -1151,7 +1151,7 @@ def generate_html_edition(
         "entry_heading", "main_text", "marginal_note", "pasted_slip",
         "calculation", "observation_table", "instrument_list",
         "coordinates", "sketch", "crossed_out", "bibliographic_ref",
-        "page_number", "catch_phrase",
+        "page_number",
     ]
     sorted_rt = sorted(
         used_rt,
@@ -2696,7 +2696,6 @@ body.view-text .facs-panel{display:none}
 .region-overlay.hide-type-coordinates .ov-box[data-region-type="coordinates"],
 .region-overlay.hide-type-instrument_list .ov-box[data-region-type="instrument_list"],
 .region-overlay.hide-type-entry_heading .ov-box[data-region-type="entry_heading"],
-.region-overlay.hide-type-catch_phrase .ov-box[data-region-type="catch_phrase"],
 .region-overlay.hide-type-pasted_slip .ov-box[data-region-type="pasted_slip"]{
   display:none;
 }
