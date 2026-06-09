@@ -96,7 +96,6 @@ REGION TYPES TO DETECT:
 - coordinates: Geographic coordinate notations (latitude, longitude)
 - instrument_list: Lists of scientific instruments (often with prices)
 - page_number: Folio number (usually in top corner, e.g. "2r", "67")
-- catch_phrase: Catchword at page bottom for continuation
 
 CRITICAL RULES:
 
