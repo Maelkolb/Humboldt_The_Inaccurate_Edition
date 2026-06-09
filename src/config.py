@@ -60,7 +60,6 @@ REGION_TYPES: list[str] = [
     "coordinates",          # geographic coordinate notations
     "instrument_list",      # lists of scientific instruments (often with prices)
     "page_number",          # folio number (usually top corner)
-    "catch_phrase",         # catchword at page bottom for continuation
 ]
 
 # ---------------------------------------------------------------------------
@@ -164,7 +163,6 @@ REGION_COLORS: dict[str, str] = {
     "coordinates":       "#0d47a1",
     "instrument_list":   "#bf360c",
     "page_number":       "#78909c",
-    "catch_phrase":      "#546e7a",
 }
 
 REGION_LABELS: dict[str, str] = {
@@ -180,5 +178,4 @@ REGION_LABELS: dict[str, str] = {
     "coordinates":       "Coordinates",
     "instrument_list":   "Instrument List",
     "page_number":       "Page No.",
-    "catch_phrase":      "Catchword",
 }
