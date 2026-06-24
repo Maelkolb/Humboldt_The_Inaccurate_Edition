@@ -5,3 +5,7 @@ __pycache__/
 .env
 .venv/
 *.egg-info/
+ehd_register_index.json
+ehd_index.json
+*_linked.json
+entity_consistency_report.json

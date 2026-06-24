@@ -395,6 +395,24 @@ def _postprocess_editorial(html: str) -> str:
     return html
 
 
+def _authority_source(uri: Optional[str]) -> str:
+    """Short human label for an authority URI host (for entity tooltips)."""
+    if not uri:
+        return ""
+    u = uri.lower()
+    if "viaf.org" in u:
+        return "VIAF"
+    if "d-nb.info/gnd" in u or "/gnd/" in u:
+        return "GND"
+    if "geonames.org" in u:
+        return "GeoNames"
+    if "gbif.org" in u:
+        return "GBIF"
+    if "edition-humboldt.de" in u:
+        return "eHD"
+    return ""
+
+
 def _annotate_text(
     text: str, entities: List[Entity], ec: Dict[str, str]
 ) -> str:
@@ -412,12 +430,37 @@ def _annotate_text(
             f" → {html_lib.escape(ent.normalized_form)}"
             if ent.normalized_form else ""
         )
-        parts.append(
-            f'<mark class="ent" data-type="{html_lib.escape(ent.entity_type)}"'
-            f' style="--ent:{color};" '
-            f'title="{html_lib.escape(ent.entity_type)}: {ctx}{norm}">'
-            f'{_render_plain(text[s:e])}</mark>'
-        )
+        surface = _render_plain(text[s:e])
+        # Authority link (populated by the optional entity-linking post-process).
+        # Prefer the eHD register page (persons/places); fall back to the raw
+        # authority URI (e.g. GBIF for plants, which have no eHD page).
+        link = getattr(ent, "ehd_url", None) or getattr(ent, "authority_uri", None)
+        if link:
+            auth_uri = getattr(ent, "authority_uri", None)
+            auth_label = getattr(ent, "authority_label", None)
+            src = _authority_source(auth_uri or link)
+            bits = [f"{html_lib.escape(ent.entity_type)}: {ctx}{norm}"]
+            if auth_label:
+                bits.append(f"⟶ {html_lib.escape(auth_label)}")
+            ref = ent.ehd_id if getattr(ent, "ehd_id", None) else ""
+            tail = " · ".join(x for x in (f"{src}" if src else "", ref) if x)
+            if tail:
+                bits.append(tail)
+            title = " | ".join(bits)
+            parts.append(
+                f'<a class="ent is-linked" data-type="{html_lib.escape(ent.entity_type)}"'
+                f' style="--ent:{color};" href="{html_lib.escape(link)}"'
+                f' target="_blank" rel="noopener noreferrer"'
+                f' title="{title}">{surface}'
+                f'<span class="ent-ext" aria-hidden="true">↗</span></a>'
+            )
+        else:
+            parts.append(
+                f'<mark class="ent" data-type="{html_lib.escape(ent.entity_type)}"'
+                f' style="--ent:{color};" '
+                f'title="{html_lib.escape(ent.entity_type)}: {ctx}{norm}">'
+                f'{surface}</mark>'
+            )
         cur = e
     if cur < len(text):
         parts.append(_render_plain(text[cur:]))
@@ -3344,6 +3387,24 @@ body.view-text .facs-panel{display:none}
   text-decoration:none;
   background:transparent;
 }
+/* Authority-linked entities (entity-linking post-process) */
+a.ent.is-linked{
+  cursor:pointer;
+  text-decoration-style:dotted;
+  text-decoration-thickness:2px;
+}
+a.ent.is-linked:hover{
+  text-decoration-style:solid;
+}
+.ent-ext{
+  font-size:.62em;
+  line-height:1;
+  vertical-align:super;
+  margin-left:.06em;
+  opacity:.55;
+}
+a.ent.is-linked:hover .ent-ext{ opacity:.9; }
+.ent.hide-type .ent-ext{ display:none; }
 
 /* Editorial markup */
 .ed-struck{
