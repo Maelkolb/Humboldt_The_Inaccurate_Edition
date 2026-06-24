@@ -136,6 +136,50 @@ class Entity:
     context: Optional[str] = None
     normalized_form: Optional[str] = None  # modern/standardized form
     language: Optional[str] = None  # language of the entity mention
+    # ----- Authority linking (edition humboldt digital register) -----
+    # Populated by the optional, standalone src.entity_linking post-processor
+    # (run after the pipeline via scripts/link_entities.py). Absent/None when
+    # no register match was found (e.g. minerals among Species entities, which
+    # are not in the plant register). ``authority_uri`` chains out to VIAF/GND
+    # (persons), GeoNames (places) or GBIF (plants).
+    ehd_id: Optional[str] = None            # eHD register id, e.g. "H0006403"
+    ehd_url: Optional[str] = None           # https://edition-humboldt.de/v11/<id>
+    authority_uri: Optional[str] = None     # VIAF/GND/GeoNames/GBIF URI
+    authority_label: Optional[str] = None   # canonical register/authority label
+    link_method: Optional[str] = None       # normalized_form|exact|alt|surname|fuzzy
+    link_score: Optional[float] = None      # 0..1 match confidence
+    link_ambiguous: bool = False            # >1 register candidate at top rank
+    link_candidates: List[str] = field(default_factory=list)  # other eHD ids
+
+
+def entity_to_dict(e: "Entity") -> Dict:
+    """Serialise an Entity, omitting authority-link fields that are unset.
+
+    Keeps the JSON for unlinked entities byte-for-byte compatible with the
+    pre-linking pipeline output; linked entities gain the eHD/authority keys.
+    """
+    d = {
+        "text": e.text,
+        "entity_type": e.entity_type,
+        "start_char": e.start_char,
+        "end_char": e.end_char,
+        "context": e.context,
+        "normalized_form": e.normalized_form,
+        "language": e.language,
+    }
+    if e.ehd_id:
+        d["ehd_id"] = e.ehd_id
+        if e.ehd_url:
+            d["ehd_url"] = e.ehd_url
+        d["authority_uri"] = e.authority_uri
+        d["authority_label"] = e.authority_label
+        d["link_method"] = e.link_method
+        d["link_score"] = e.link_score
+        if e.link_ambiguous:
+            d["link_ambiguous"] = True
+        if e.link_candidates:
+            d["link_candidates"] = e.link_candidates
+    return d
 
 
 @dataclass
@@ -192,7 +236,7 @@ class PageResult:
             "folio_label": self.folio_label,
             "regions": [r.to_dict() for r in self.regions],
             "full_text": self.full_text,
-            "entities": [asdict(e) for e in self.entities],
+            "entities": [entity_to_dict(e) for e in self.entities],
             "locations": [asdict(loc) for loc in self.locations],
             "processing_timestamp": self.processing_timestamp,
             "model_used": self.model_used,
@@ -217,6 +261,14 @@ class PageResult:
                 context=e.get("context"),
                 normalized_form=e.get("normalized_form"),
                 language=e.get("language"),
+                ehd_id=e.get("ehd_id"),
+                ehd_url=e.get("ehd_url"),
+                authority_uri=e.get("authority_uri"),
+                authority_label=e.get("authority_label"),
+                link_method=e.get("link_method"),
+                link_score=e.get("link_score"),
+                link_ambiguous=e.get("link_ambiguous", False),
+                link_candidates=e.get("link_candidates", []),
             )
             for e in d.get("entities", [])
         ]

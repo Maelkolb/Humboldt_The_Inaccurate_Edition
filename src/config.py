@@ -43,6 +43,31 @@ IMAGE_FOLDER: Path = Path(os.environ.get("IMAGE_FOLDER", BASE_DIR / "images"))
 OUTPUT_FOLDER: Path = Path(os.environ.get("OUTPUT_FOLDER", BASE_DIR / "output"))
 
 # ---------------------------------------------------------------------------
+# Entity linking – edition humboldt digital authority register
+# ---------------------------------------------------------------------------
+# Entity linking is a SEPARATE, OPTIONAL post-processing module that runs AFTER
+# the pipeline has finished, over the produced digital_edition_complete.json
+# (see scripts/link_entities.py). It does not run as part of process_book().
+# These settings only provide defaults for that standalone tool.
+#
+# EHD_REGISTER_DIR: local clone of telota/edition-humboldt-digital (the
+# directory containing data/index/). Used as the default for the linker CLI's
+# --register argument.
+EHD_REGISTER_DIR: str | None = os.environ.get("EHD_REGISTER_DIR") or None
+# Compiled index cache (built on first use, reused afterwards). Defaults to a
+# file next to the register repo.
+EHD_REGISTER_CACHE: str | None = os.environ.get("EHD_REGISTER_CACHE") or None
+# Default fuzzy-match cutoff for the linker (overridable via --fuzzy-cutoff).
+ENTITY_LINK_FUZZY_CUTOFF: float = float(os.environ.get("ENTITY_LINK_FUZZY_CUTOFF", "0.9"))
+
+# NER entity_type -> eHD register kind. Only these types are linked.
+ENTITY_TYPE_TO_REGISTER_KIND: dict[str, str] = {
+    "Person": "person",
+    "Location": "place",
+    "Species": "plant",
+}
+
+# ---------------------------------------------------------------------------
 # Region types – custom for Humboldt's journal layout
 # ---------------------------------------------------------------------------
 

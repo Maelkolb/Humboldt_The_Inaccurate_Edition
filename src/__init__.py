@@ -7,6 +7,16 @@ from .region_detection import detect_regions
 from .transcription import transcribe_regions
 from .consistency_check import check_and_fix_regions
 from .ner import perform_ner
+from .entity_register import EntityRegister, RegisterEntry, LinkMatch
+from .entity_linking import (
+    link_entity,
+    link_entities,
+    link_results,
+    check_entity_consistency,
+    link_and_check,
+    link_and_check_json,
+    DEFAULT_TYPE_TO_KIND,
+)
 from .geo_consistency import validate_locations
 from .tei_parser import parse_tei_file, parse_tei_string
 from .tei_writer import (
@@ -35,6 +45,16 @@ __all__ = [
     "transcribe_regions",
     "check_and_fix_regions",
     "perform_ner",
+    "EntityRegister",
+    "RegisterEntry",
+    "LinkMatch",
+    "link_entity",
+    "link_entities",
+    "link_results",
+    "check_entity_consistency",
+    "link_and_check",
+    "link_and_check_json",
+    "DEFAULT_TYPE_TO_KIND",
     "validate_locations",
     "parse_tei_file",
     "parse_tei_string",
