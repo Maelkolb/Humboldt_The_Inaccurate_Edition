@@ -2871,12 +2871,15 @@ body.view-text .facs-panel{display:none}
 .doc-slot-body{
   height:auto;
   min-height:100%;
-  /* Never clip: the JS fit pass sizes the box to the content (growing it when
-     a dense region can't shrink to fit) and caps the scale so the widest word
-     fits the width; visible + break-word guarantee no character is ever cut
-     off even if a measurement is momentarily stale. */
+  /* Preserve the manuscript's own line breaks. The transcription keeps a
+     <br> at every original line break, and white-space:nowrap stops the
+     browser from adding any further (soft) wraps — so each original line
+     renders as exactly one line, never re-flowed to the box width. The JS
+     fit pass then scales the text so the widest line fits the box width while
+     the lines fill its height, the way the handwriting fills that area on the
+     page. overflow stays visible so an unusually long line is never clipped. */
   overflow:visible;
-  overflow-wrap:break-word;
+  white-space:nowrap;
   font-family:var(--f-body);
   color:var(--text);
   line-height:1.45;
@@ -2936,7 +2939,7 @@ body.view-text .facs-panel{display:none}
 }
 .doc-data{
   font-family:var(--f-mono);
-  white-space:pre-wrap;
+  white-space:pre;
   margin:0;
   font-size:inherit;
   line-height:1.35;
@@ -3390,6 +3393,10 @@ body.view-text .facs-panel{display:none}
 /* Authority-linked entities (entity-linking post-process) */
 a.ent.is-linked{
   cursor:pointer;
+  /* Keep the word and its ↗ marker together as one unbreakable unit, so a
+     linked word is never split across two lines (and the facsimile fit pass
+     scales the region to fit it on one line instead of wrapping mid-word). */
+  white-space:nowrap;
   text-decoration-style:dotted;
   text-decoration-thickness:2px;
 }
@@ -3397,11 +3404,17 @@ a.ent.is-linked:hover{
   text-decoration-style:solid;
 }
 .ent-ext{
+  /* Zero layout width: the glyph paints just past the last letter but does not
+     widen the line, so a linked heading measures and scales exactly like the
+     original word — no downscaling, no mid-word break. */
+  display:inline-block;
+  width:0;
+  overflow:visible;
   font-size:.62em;
   line-height:1;
   vertical-align:super;
-  margin-left:.06em;
-  opacity:.55;
+  margin-left:.04em;
+  opacity:.5;
 }
 a.ent.is-linked:hover .ent-ext{ opacity:.9; }
 .ent.hide-type .ent-ext{ display:none; }
@@ -4023,9 +4036,11 @@ _JS = r"""
       }
       s.style.setProperty('--slot-scale', scale.toFixed(3));
 
-      // Cap the scale so the widest word still fits the box width. The
-      // height-fill above can scale a short region up until a long word is
-      // wider than its bbox; without this it would be clipped horizontally.
+      // Cap the scale so the widest line still fits the box width. With
+      // white-space:nowrap each original line is unbreakable, so the
+      // height-fill above can scale a region up until its longest line is
+      // wider than the bbox; this pulls it back so every line fits on one
+      // line at the original break points.
       for(var wit = 0; wit < 5; wit++){
         if(body.scrollWidth <= body.clientWidth + 1 || scale <= MIN_SCALE) break;
         scale = Math.max(
