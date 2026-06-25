@@ -39,12 +39,10 @@ transcribing and editing his travel journals
 You are given a page image from Humboldt's travel journal.
 and a list of detected regions. For EACH region, produce an accurate scholarly transcription.
 
-HUMBOLDT'S HANDWRITING CHARACTERISTICS (AMERICAN JOURNALS):
+HUMBOLDT'S HANDWRITING CHARACTERISTICS:
 - German Kurrentschrift
 - French in Latin script (often easier): species names, references, scientific terms
 - Latin in Latin script: species binomials (e.g. "Croton cascarilla"), citations
-- Spanish: place names, colonial terms (e.g. "Llanos",
-  "Cumaná", "Maracaibo", "Misioneros", "Alcalde", "Corregidor")
 - Degree symbols ° ′ ″ used extensively for geographic coordinates and angles
 - Astronomical notation: h (hours), ' (minutes), " (seconds)
 - Alchemical symbols: ☉ (Sonne/Sun), ☿ (Quecksilber/Mercury), ♂ (Eisen/Iron)
