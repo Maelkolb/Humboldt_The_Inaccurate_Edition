@@ -2875,14 +2875,11 @@ body.view-text .facs-panel{display:none}
      <br> at every original line break, and white-space:nowrap stops the
      browser from adding any further (soft) wraps — so each original line
      renders as exactly one line, never re-flowed to the box width. The JS
-     fit pass then scales the text so the widest line fits the box width while
-     the lines fill its height, the way the handwriting fills that area on the
-     page. overflow stays visible so an unusually long line is never clipped.
-     Exception: when a region is too narrow for one of its lines to fit at a
-     legible size (typical of slim marginal-note columns), the JS fit pass
-     flips THIS slot's white-space to `normal` so the over-long line soft-
-     wraps instead of forcing the whole region to shrink to an unreadable
-     size — the <br> breaks are still honoured, only over-long lines wrap. */
+     fit pass then picks one --slot-scale per region = the smaller of the
+     height-fit and the width-fit, so the N lines fill the box height while
+     the widest line still fits the box width — exactly the way the
+     handwriting fills that area on the page, with the line breaks intact.
+     overflow stays visible so a stray long line is never clipped. */
   overflow:visible;
   white-space:nowrap;
   font-family:var(--f-body);
@@ -3978,198 +3975,66 @@ _JS = r"""
   document.addEventListener('webkitfullscreenchange', updateFsButtons);
 
   // ============================================================
-  // Document view layout pass — fill-to-bbox + overlap reflow
+  // Document view layout pass — fit each region's text to its bbox
   // ------------------------------------------------------------
-  //   (1) Fill-to-fit: each region's text is scaled so it fills its own
-  //       bbox — exactly as the handwriting fills that area on the page —
-  //       growing OR shrinking within [MIN_SCALE, MAX_SCALE]. This removes
-  //       the empty gaps left when short transcriptions sat at the top of a
-  //       tall box. If a dense region still overflows at MIN_SCALE, the box
-  //       is allowed to grow taller (never clipping text), and the cascade
-  //       below keeps it off its neighbours.
+  // Simple and deterministic. Every region keeps its TRUE bbox position
+  // (top / left / width / height as a % of the page, mirroring the
+  // facsimile exactly) and its transcribed text is scaled by a single
+  // multiplier, --slot-scale, so the text fills that box. Font size scales
+  // linearly with the multiplier, so ONE measurement at scale 1 solves the
+  // fit — no iteration, no overlap cascade, no re-wrapping, no moving boxes.
   //
-  //   (2) Overlap safety net: regions only collide when their detector
-  //       bboxes genuinely overlap. A cascade pushes the lower region down
-  //       just enough to clear the upper one, counting them as stacked only
-  //       when their shared x-range covers >= MIN_X_OVERLAP_RATIO of the
-  //       wider region (so a narrow margin note sits *beside* a wide body
-  //       paragraph). Tops are written in PIXELS so they stay stable when
-  //       the canvas grows to swallow a downward push.
+  //   scaleH = boxHeight * FILL  / naturalTextHeight   (fit N lines into the
+  //                                                     box height)
+  //   scaleW = boxWidth  * WFILL / widestLineWidth     (fit the widest line
+  //                                                     into the box width)
+  //   scale  = clamp( min(scaleH, scaleW), MIN_SCALE, MAX_SCALE )
+  //
+  // The body is white-space:nowrap, so the manuscript's own line breaks
+  // (one <br> per original line) are preserved exactly — nothing reflows.
+  // Taking the smaller of the height- and width-fit keeps every region
+  // inside its own rectangle, so boxes never need to be pushed around.
   // ============================================================
 
   var MIN_SCALE = 0.5;
   var MAX_SCALE = 2.6;
-  var FILL      = 0.92;   // target fraction of the bbox height to fill
-                          // (<1 leaves a little breathing room between
-                          //  vertically adjacent regions)
-  // Width-fit guard. When making a region's widest line fit its box would
-  // require shrinking the text below this fraction of its height-fill scale,
-  // the slot is allowed to soft-wrap instead of being crushed smaller. Tuned
-  // so a narrow marginal note that contains one long line wraps that line
-  // rather than rendering the whole note microscopically small.
-  var WRAP_TRIGGER = 0.78;
+  var FILL      = 0.92;   // fraction of the box HEIGHT the lines should fill
+                          // (<1 leaves a little air between stacked regions)
+  var WFILL     = 0.97;   // fraction of the box WIDTH the widest line may use
 
   function reflowDocCanvas(canvas){
     if(!canvas) return;
     var slots = Array.from(canvas.querySelectorAll('.doc-slot'));
     if(!slots.length) return;
-
-    // ---- Reset: drop prior growth, restore original top% and scale 1.
-    canvas.style.minHeight = '';
-    slots.forEach(function(s){
-      if(s.dataset.origTop != null && s.dataset.origTop !== ''){
-        s.style.top = s.dataset.origTop + '%';
-      }
-      s.style.setProperty('--slot-scale', '1');
-    });
     var canvasH = canvas.getBoundingClientRect().height;
     if(!canvasH) return;                              // hidden / not laid out
 
-    // ---- Step 1: scale each slot's text to fill its bbox height --------
     slots.forEach(function(s){
       var body = s.querySelector('.doc-slot-body');
       if(!body) return;
       var origH = parseFloat(s.dataset.origH || '0');
-      var bboxH = (origH / 100) * canvasH;
-      if(bboxH < 6) return;                           // too small to bother
+      var boxH = (origH / 100) * canvasH;
+      if(boxH < 6) return;                            // too small to bother
 
-      // Reset any wrap state left over from a previous pass (resize / mode
-      // switch) so the nowrap-first measurement below starts clean.
-      body.style.whiteSpace = '';
+      // Measure the text once, at scale 1. Drop the body's min-height floor
+      // first so scrollHeight reports the true content height (N lines), not
+      // the box height it is otherwise stretched to fill.
+      body.style.setProperty('--slot-scale', '1');
+      body.style.minHeight = '0';
+      var natH = body.scrollHeight;                   // height of N lines
+      var natW = body.scrollWidth;                    // width of the widest line
+      var boxW = body.clientWidth;                    // inner width of the box
+      body.style.minHeight = '';                      // restore CSS min-height:100%
+      if(natH < 1 || boxW < 1) return;
 
-      // Measure pure content height (lift the bbox min-height floor).
-      s.style.minHeight = '0';
+      var scaleH = (boxH * FILL) / natH;
+      var scaleW = natW > 0 ? (boxW * WFILL) / natW : scaleH;
+      var scale  = Math.min(scaleH, scaleW);
+      if(scale < MIN_SCALE) scale = MIN_SCALE;
+      else if(scale > MAX_SCALE) scale = MAX_SCALE;
 
-      // Height-fill: grow/shrink the text so it fills bboxH. Factored into a
-      // helper because we may run it twice — once with the manuscript's own
-      // line breaks (nowrap), and, if a line is too wide for the box, again
-      // after switching the slot to soft-wrapping.
-      function fitHeight(){
-        var sc = 1;
-        for(var it = 0; it < 6; it++){
-          s.style.setProperty('--slot-scale', sc.toFixed(3));
-          var natural = body.scrollHeight;
-          if(natural < 1) break;
-          var corr = (bboxH * FILL) / natural;
-          var next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, sc * corr));
-          if(Math.abs(next - sc) < 0.01){ sc = next; break; }
-          sc = next;
-        }
-        return sc;
-      }
-
-      // Shrink the scale until the widest line fits the box width, never
-      // below MIN_SCALE. Returns the resulting scale.
-      function shrinkToWidth(sc){
-        for(var wit = 0; wit < 6; wit++){
-          if(body.scrollWidth <= body.clientWidth + 1 || sc <= MIN_SCALE) break;
-          sc = Math.max(
-            MIN_SCALE,
-            sc * (body.clientWidth / body.scrollWidth) * 0.98
-          );
-          s.style.setProperty('--slot-scale', sc.toFixed(3));
-        }
-        return sc;
-      }
-
-      var scale = fitHeight();
-      s.style.setProperty('--slot-scale', scale.toFixed(3));
-
-      // ── Width fit ───────────────────────────────────────────────────
-      // With white-space:nowrap every manuscript line is one unbreakable
-      // line. For a WIDE region (main text) the lines roughly match the box
-      // width, so a gentle shrink keeps them on one line at the original
-      // break points — what we want. But for a NARROW region (a marginal
-      // note in a slim margin column) a single long transcribed line can be
-      // several times wider than the box. Shrinking to fit *that one line*
-      // then drags the whole note down to MIN_SCALE and the text renders
-      // microscopically small. That was the bug: it only struck notes that
-      // happened to contain a long line, which is exactly why it looked
-      // intermittent — some marginalia tiny, most fine.
-      //
-      // Fix: shrink-to-fit only when the required shrink is modest. If the
-      // widest line would force the scale below WRAP_TRIGGER × the height-
-      // fill scale, prefer legibility over preserving that single line
-      // break — let the slot soft-wrap (the explicit <br> breaks are still
-      // honoured; only over-long lines wrap further) and re-fill the box
-      // height at a readable size.
-      if(body.scrollWidth > body.clientWidth + 1){
-        var widthRatio = body.clientWidth / body.scrollWidth;   // in (0,1)
-        if(widthRatio >= WRAP_TRIGGER){
-          scale = shrinkToWidth(scale);                         // modest: shrink
-        } else {
-          body.style.whiteSpace = 'normal';                     // too wide: wrap
-          scale = fitHeight();
-          s.style.setProperty('--slot-scale', scale.toFixed(3));
-          // Guard against a single unbreakable token still wider than the box.
-          scale = shrinkToWidth(scale);
-        }
-      }
-
-      // If the text still overflows its bbox (dense region clamped at
-      // MIN_SCALE), let the box grow so nothing is cut off; otherwise keep
-      // it on its exact bbox rectangle.
-      var finalH = body.scrollHeight;
-      if(finalH > bboxH + 1){
-        s.style.minHeight = Math.ceil(finalH) + 'px';
-      } else {
-        s.style.minHeight = origH.toFixed(3) + '%';
-      }
+      body.style.setProperty('--slot-scale', scale.toFixed(3));
     });
-
-    // ---- Step 2: cascade-resolve overlapping bboxes -------------------
-    var items = slots.map(function(s){
-      var top   = parseFloat(s.style.top || '0');     // % of canvas
-      var left  = parseFloat(s.style.left || '0');
-      var width = parseFloat(s.style.width || '0');
-      return {
-        slot: s,
-        left: left,
-        right: left + width,
-        topPx: (top / 100) * canvasH,
-        heightPx: s.offsetHeight,
-      };
-    });
-
-    var GAP_PX = 7;
-    var MIN_X_OVERLAP_RATIO = 0.30;
-    for(var pass = 0; pass < 8; pass++){
-      items.sort(function(a, b){ return a.topPx - b.topPx; });
-      var changed = false;
-      for(var i = 0; i < items.length; i++){
-        var cur = items[i];
-        var curBottom = cur.topPx + cur.heightPx;
-        var curW = cur.right - cur.left;
-        for(var j = i + 1; j < items.length; j++){
-          var other = items[j];
-          var ov = Math.min(cur.right, other.right) -
-                   Math.max(cur.left, other.left);
-          if(ov <= 0.2) continue;
-          var maxW = Math.max(curW, other.right - other.left);
-          if(maxW <= 0 || ov / maxW < MIN_X_OVERLAP_RATIO) continue;
-          if(other.topPx < curBottom + GAP_PX){
-            other.topPx = curBottom + GAP_PX;
-            changed = true;
-          }
-        }
-      }
-      if(!changed) break;
-    }
-
-    // Write tops in PIXELS (stable through canvas-height changes).
-    items.forEach(function(it){
-      it.slot.style.top = Math.round(it.topPx) + 'px';
-    });
-
-    // Grow the canvas if the cascade pushed content past the bottom.
-    var maxBottom = 0;
-    items.forEach(function(it){
-      var b = it.topPx + it.heightPx;
-      if(b > maxBottom) maxBottom = b;
-    });
-    if(maxBottom > canvasH - 8){
-      canvas.style.minHeight = Math.ceil(maxBottom + 12) + 'px';
-    }
   }
 
   function reflowPage(page){
