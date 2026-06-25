@@ -800,6 +800,72 @@ def _doc_inline_content(
     return _render_region_text(region, entities, ec)
 
 
+# Minimum visual gap (in % of the page) to leave between separated boxes.
+_DEOVERLAP_GAP = 0.5
+
+
+def _deoverlap_slots(items: List[Dict], gap: float = _DEOVERLAP_GAP,
+                     passes: int = 12) -> None:
+    """Gently separate any overlapping Document-view boxes, in place.
+
+    Region detector bounding boxes occasionally overlap (a heading box dipping
+    into the text below it, two stacked paragraphs, or two columns sharing a
+    seam). Each region keeps its *size*; only its top/left move. For an
+    overlapping pair we resolve along the axis of the *smaller* overlap — the
+    minimum nudge: a vertical overlap pushes the lower box straight down, a
+    horizontal overlap (side-by-side columns) splits the pair apart sideways.
+    Everything is in the page's normalised 0–100 space; a handful of passes
+    converge. Because the slot's rendered rectangle is exactly its bbox
+    rectangle (the runtime fit only scales the text *inside* the box), doing
+    this at generation time is equivalent to — and far simpler than — a
+    runtime layout cascade.
+    """
+    n = len(items)
+    if n < 2:
+        return
+    for _ in range(passes):
+        order = sorted(range(n), key=lambda i: (items[i]["t"], items[i]["l"]))
+        moved = False
+        for ai in range(n):
+            for bi in range(ai + 1, n):
+                a = items[order[ai]]
+                b = items[order[bi]]
+                ox = min(a["l"] + a["w"], b["l"] + b["w"]) - max(a["l"], b["l"])
+                oy = min(a["t"] + a["h"], b["t"] + b["h"]) - max(a["t"], b["t"])
+                if ox <= 0.001 or oy <= 0.001:
+                    continue
+                if oy <= ox:                       # vertical: lower box moves down
+                    lo, hi = (a, b) if a["t"] <= b["t"] else (b, a)
+                    hi["t"] = lo["t"] + lo["h"] + gap
+                else:                              # horizontal: split apart
+                    push = (ox + gap) / 2.0
+                    lft, rgt = (a, b) if a["l"] <= b["l"] else (b, a)
+                    lft["l"] = max(0.0, lft["l"] - push)
+                    rgt["l"] = min(100.0 - rgt["w"], rgt["l"] + push)
+                moved = True
+        if not moved:
+            break
+
+
+def _fit_doc_aspect(items: List[Dict], aspect: float) -> float:
+    """If de-overlap pushed any box past the page bottom (>100%), scale all
+    vertical positions back into [0,100] and return a proportionally taller
+    canvas aspect so nothing is clipped. The vertical scale is uniform, so
+    every slot keeps the same rendered pixel size and the text-fit is
+    unchanged — the canvas simply grows tall enough to hold the content.
+    """
+    if not items:
+        return aspect
+    max_bottom = max(it["t"] + it["h"] for it in items)
+    if max_bottom <= 100.0:
+        return aspect
+    f = 100.0 / max_bottom
+    for it in items:
+        it["t"] *= f
+        it["h"] *= f
+    return aspect * f
+
+
 def _build_doc_panel(
     regions: List[Region],
     entities: List[Entity],
@@ -820,12 +886,24 @@ def _build_doc_panel(
     ]
     positioned.sort(key=_sort_key)
 
-    slots = []
+    # Resolve each region to a rectangle, then gently separate any overlapping
+    # boxes and, if that pushed content off the page bottom, grow the canvas to
+    # contain it. Both steps are pure geometry on the bbox rectangles.
+    items: List[Dict] = []
     for r in positioned:
         rect = _bbox_rect_pct(r)
         if rect is None:
             continue
         top, left, width, height = rect
+        items.append({"r": r, "t": top, "l": left, "w": width, "h": height})
+
+    _deoverlap_slots(items)
+    aspect = _fit_doc_aspect(items, aspect)
+
+    slots = []
+    for it in items:
+        r = it["r"]
+        top, left, width, height = it["t"], it["l"], it["w"], it["h"]
         color = rc.get(r.region_type, _REGION_FALLBACK_COLOR)
         inner = _doc_inline_content(r, entities, ec)
         extras = _region_classes(r)
