@@ -2871,17 +2871,15 @@ body.view-text .facs-panel{display:none}
 .doc-slot-body{
   height:auto;
   min-height:100%;
-  /* Preserve the manuscript's own line breaks. The transcription keeps a
-     <br> at every original line break, and white-space:nowrap stops the
-     browser from adding any further (soft) wraps — so each original line
-     renders as exactly one line, never re-flowed to the box width. The JS
-     fit pass then picks one --slot-scale per region = the smaller of the
-     height-fit and the width-fit, so the N lines fill the box height while
-     the widest line still fits the box width — exactly the way the
-     handwriting fills that area on the page, with the line breaks intact.
-     overflow stays visible so a stray long line is never clipped. */
+  /* Keep the manuscript's own line breaks — each <br> is a hard break — but
+     let an over-long line WRAP to the box width instead of overflowing or
+     being shrunk to nothing. Wrapping is what lets every region fit its box
+     cleanly. The JS fit pass then scales the text (one --slot-scale per
+     region) so the wrapped lines fill the box height, the way the handwriting
+     fills that area on the page. overflow stays visible as a safety net. */
   overflow:visible;
-  white-space:nowrap;
+  white-space:normal;
+  overflow-wrap:break-word;
   font-family:var(--f-body);
   color:var(--text);
   line-height:1.45;
@@ -3975,32 +3973,53 @@ _JS = r"""
   document.addEventListener('webkitfullscreenchange', updateFsButtons);
 
   // ============================================================
+  // ============================================================
   // Document view layout pass — fit each region's text to its bbox
   // ------------------------------------------------------------
-  // Simple and deterministic. Every region keeps its TRUE bbox position
+  // One idea, applied to every region: the slot sits at its TRUE bbox
   // (top / left / width / height as a % of the page, mirroring the
-  // facsimile exactly) and its transcribed text is scaled by a single
-  // multiplier, --slot-scale, so the text fills that box. Font size scales
-  // linearly with the multiplier, so ONE measurement at scale 1 solves the
-  // fit — no iteration, no overlap cascade, no re-wrapping, no moving boxes.
+  // facsimile) and its text is WRAPPED to the box width, then scaled so it
+  // fills the box height. Wrapping is what makes the text fit perfectly — a
+  // line too long for a narrow box reflows to the next line instead of
+  // overflowing or being shrunk to nothing. (Shrinking a whole region to fit
+  // one over-long line is what used to render marginalia, and any region with
+  // a long line, microscopically small.) The manuscript's own line breaks are
+  // kept — each <br> is a hard break — and wrapping only adds soft breaks
+  // inside an over-long line.
   //
-  //   scaleH = boxHeight * FILL  / naturalTextHeight   (fit N lines into the
-  //                                                     box height)
-  //   scaleW = boxWidth  * WFILL / widestLineWidth     (fit the widest line
-  //                                                     into the box width)
-  //   scale  = clamp( min(scaleH, scaleW), MIN_SCALE, MAX_SCALE )
-  //
-  // The body is white-space:nowrap, so the manuscript's own line breaks
-  // (one <br> per original line) are preserved exactly — nothing reflows.
-  // Taking the smaller of the height- and width-fit keeps every region
-  // inside its own rectangle, so boxes never need to be pushed around.
+  // Sizing is a single binary search per region: the largest --slot-scale in
+  // [MIN_SCALE, MAX_SCALE] whose wrapped text still fits the box height.
+  // Because a bigger font makes lines longer ⇒ wrap more ⇒ grow taller,
+  // height increases monotonically with scale, so the search always converges.
+  // No width pass, no overlap cascade, no moving boxes: wrap + fit-height is
+  // all that's needed, and every region stays inside its own rectangle.
   // ============================================================
 
-  var MIN_SCALE = 0.5;
+  var MIN_SCALE = 0.4;
   var MAX_SCALE = 2.6;
-  var FILL      = 0.92;   // fraction of the box HEIGHT the lines should fill
+  var FILL      = 0.92;   // fraction of the box height the text should fill
                           // (<1 leaves a little air between stacked regions)
-  var WFILL     = 0.97;   // fraction of the box WIDTH the widest line may use
+
+  function fitSlot(s, canvasH){
+    var body = s.querySelector('.doc-slot-body');
+    if(!body) return;
+    var origH = parseFloat(s.dataset.origH || '0');
+    var boxH = (origH / 100) * canvasH;
+    if(boxH < 6) return;                              // too small to bother
+    var target = boxH * FILL;
+
+    // Measure the CONTENT height (not the box-filled height) while searching,
+    // by dropping the body's min-height floor; restore it afterwards.
+    body.style.minHeight = '0';
+    var lo = MIN_SCALE, hi = MAX_SCALE, mid = lo;
+    for(var i = 0; i < 11; i++){
+      mid = (lo + hi) / 2;
+      body.style.setProperty('--slot-scale', mid.toFixed(3));
+      if(body.scrollHeight <= target) lo = mid; else hi = mid;
+    }
+    body.style.setProperty('--slot-scale', lo.toFixed(3));
+    body.style.minHeight = '';                        // restore CSS min-height:100%
+  }
 
   function reflowDocCanvas(canvas){
     if(!canvas) return;
@@ -4008,33 +4027,7 @@ _JS = r"""
     if(!slots.length) return;
     var canvasH = canvas.getBoundingClientRect().height;
     if(!canvasH) return;                              // hidden / not laid out
-
-    slots.forEach(function(s){
-      var body = s.querySelector('.doc-slot-body');
-      if(!body) return;
-      var origH = parseFloat(s.dataset.origH || '0');
-      var boxH = (origH / 100) * canvasH;
-      if(boxH < 6) return;                            // too small to bother
-
-      // Measure the text once, at scale 1. Drop the body's min-height floor
-      // first so scrollHeight reports the true content height (N lines), not
-      // the box height it is otherwise stretched to fill.
-      body.style.setProperty('--slot-scale', '1');
-      body.style.minHeight = '0';
-      var natH = body.scrollHeight;                   // height of N lines
-      var natW = body.scrollWidth;                    // width of the widest line
-      var boxW = body.clientWidth;                    // inner width of the box
-      body.style.minHeight = '';                      // restore CSS min-height:100%
-      if(natH < 1 || boxW < 1) return;
-
-      var scaleH = (boxH * FILL) / natH;
-      var scaleW = natW > 0 ? (boxW * WFILL) / natW : scaleH;
-      var scale  = Math.min(scaleH, scaleW);
-      if(scale < MIN_SCALE) scale = MIN_SCALE;
-      else if(scale > MAX_SCALE) scale = MAX_SCALE;
-
-      body.style.setProperty('--slot-scale', scale.toFixed(3));
-    });
+    slots.forEach(function(s){ fitSlot(s, canvasH); });
   }
 
   function reflowPage(page){
