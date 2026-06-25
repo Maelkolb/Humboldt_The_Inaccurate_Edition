@@ -2877,7 +2877,12 @@ body.view-text .facs-panel{display:none}
      renders as exactly one line, never re-flowed to the box width. The JS
      fit pass then scales the text so the widest line fits the box width while
      the lines fill its height, the way the handwriting fills that area on the
-     page. overflow stays visible so an unusually long line is never clipped. */
+     page. overflow stays visible so an unusually long line is never clipped.
+     Exception: when a region is too narrow for one of its lines to fit at a
+     legible size (typical of slim marginal-note columns), the JS fit pass
+     flips THIS slot's white-space to `normal` so the over-long line soft-
+     wraps instead of forcing the whole region to shrink to an unreadable
+     size — the <br> breaks are still honoured, only over-long lines wrap. */
   overflow:visible;
   white-space:nowrap;
   font-family:var(--f-body);
@@ -3997,6 +4002,12 @@ _JS = r"""
   var FILL      = 0.92;   // target fraction of the bbox height to fill
                           // (<1 leaves a little breathing room between
                           //  vertically adjacent regions)
+  // Width-fit guard. When making a region's widest line fit its box would
+  // require shrinking the text below this fraction of its height-fill scale,
+  // the slot is allowed to soft-wrap instead of being crushed smaller. Tuned
+  // so a narrow marginal note that contains one long line wraps that line
+  // rather than rendering the whole note microscopically small.
+  var WRAP_TRIGGER = 0.78;
 
   function reflowDocCanvas(canvas){
     if(!canvas) return;
@@ -4022,32 +4033,77 @@ _JS = r"""
       var bboxH = (origH / 100) * canvasH;
       if(bboxH < 6) return;                           // too small to bother
 
+      // Reset any wrap state left over from a previous pass (resize / mode
+      // switch) so the nowrap-first measurement below starts clean.
+      body.style.whiteSpace = '';
+
       // Measure pure content height (lift the bbox min-height floor).
       s.style.minHeight = '0';
-      var scale = 1;
-      for(var it = 0; it < 5; it++){
-        s.style.setProperty('--slot-scale', scale.toFixed(3));
-        var natural = body.scrollHeight;
-        if(natural < 1) break;
-        var corr = (bboxH * FILL) / natural;
-        var next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale * corr));
-        if(Math.abs(next - scale) < 0.01){ scale = next; break; }
-        scale = next;
+
+      // Height-fill: grow/shrink the text so it fills bboxH. Factored into a
+      // helper because we may run it twice — once with the manuscript's own
+      // line breaks (nowrap), and, if a line is too wide for the box, again
+      // after switching the slot to soft-wrapping.
+      function fitHeight(){
+        var sc = 1;
+        for(var it = 0; it < 6; it++){
+          s.style.setProperty('--slot-scale', sc.toFixed(3));
+          var natural = body.scrollHeight;
+          if(natural < 1) break;
+          var corr = (bboxH * FILL) / natural;
+          var next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, sc * corr));
+          if(Math.abs(next - sc) < 0.01){ sc = next; break; }
+          sc = next;
+        }
+        return sc;
       }
+
+      // Shrink the scale until the widest line fits the box width, never
+      // below MIN_SCALE. Returns the resulting scale.
+      function shrinkToWidth(sc){
+        for(var wit = 0; wit < 6; wit++){
+          if(body.scrollWidth <= body.clientWidth + 1 || sc <= MIN_SCALE) break;
+          sc = Math.max(
+            MIN_SCALE,
+            sc * (body.clientWidth / body.scrollWidth) * 0.98
+          );
+          s.style.setProperty('--slot-scale', sc.toFixed(3));
+        }
+        return sc;
+      }
+
+      var scale = fitHeight();
       s.style.setProperty('--slot-scale', scale.toFixed(3));
 
-      // Cap the scale so the widest line still fits the box width. With
-      // white-space:nowrap each original line is unbreakable, so the
-      // height-fill above can scale a region up until its longest line is
-      // wider than the bbox; this pulls it back so every line fits on one
-      // line at the original break points.
-      for(var wit = 0; wit < 5; wit++){
-        if(body.scrollWidth <= body.clientWidth + 1 || scale <= MIN_SCALE) break;
-        scale = Math.max(
-          MIN_SCALE,
-          scale * (body.clientWidth / body.scrollWidth) * 0.98
-        );
-        s.style.setProperty('--slot-scale', scale.toFixed(3));
+      // ── Width fit ───────────────────────────────────────────────────
+      // With white-space:nowrap every manuscript line is one unbreakable
+      // line. For a WIDE region (main text) the lines roughly match the box
+      // width, so a gentle shrink keeps them on one line at the original
+      // break points — what we want. But for a NARROW region (a marginal
+      // note in a slim margin column) a single long transcribed line can be
+      // several times wider than the box. Shrinking to fit *that one line*
+      // then drags the whole note down to MIN_SCALE and the text renders
+      // microscopically small. That was the bug: it only struck notes that
+      // happened to contain a long line, which is exactly why it looked
+      // intermittent — some marginalia tiny, most fine.
+      //
+      // Fix: shrink-to-fit only when the required shrink is modest. If the
+      // widest line would force the scale below WRAP_TRIGGER × the height-
+      // fill scale, prefer legibility over preserving that single line
+      // break — let the slot soft-wrap (the explicit <br> breaks are still
+      // honoured; only over-long lines wrap further) and re-fill the box
+      // height at a readable size.
+      if(body.scrollWidth > body.clientWidth + 1){
+        var widthRatio = body.clientWidth / body.scrollWidth;   // in (0,1)
+        if(widthRatio >= WRAP_TRIGGER){
+          scale = shrinkToWidth(scale);                         // modest: shrink
+        } else {
+          body.style.whiteSpace = 'normal';                     // too wide: wrap
+          scale = fitHeight();
+          s.style.setProperty('--slot-scale', scale.toFixed(3));
+          // Guard against a single unbreakable token still wider than the box.
+          scale = shrinkToWidth(scale);
+        }
       }
 
       // If the text still overflows its bbox (dense region clamped at
