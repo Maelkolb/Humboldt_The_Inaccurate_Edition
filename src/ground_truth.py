@@ -500,6 +500,36 @@ def _fill_unmatched_gt(
     return out
 
 
+def _attach_gt_entities(
+    regions: List[Region], gt_page: PageResult
+) -> List[Region]:
+    """Attach eHD gold-standard entities to each region whose matched
+    ground-truth text contains their surface form.
+
+    The GT page's entities (persName/placeName/orgName parsed from the GT TEI,
+    already carrying eHD register / authority refs) are page-level. We assign
+    each to a region by surface-form membership in that region's
+    ``ground_truth_content`` — robust to the line-reflow the matcher applies
+    (character offsets would not survive it). An entity is attached to a region
+    only if its text actually occurs in that region's GT slice, so the renderer
+    highlights exactly the mentions present in what the GT tab shows.
+    """
+    import dataclasses
+
+    gt_entities = getattr(gt_page, "entities", None) or []
+    if not gt_entities:
+        return regions
+    out: List[Region] = []
+    for r in regions:
+        gt = r.ground_truth_content or ""
+        matched = [e for e in gt_entities if e.text and e.text in gt] if gt else []
+        if matched:
+            out.append(dataclasses.replace(r, ground_truth_entities=matched))
+        else:
+            out.append(r)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Prompt
 # ---------------------------------------------------------------------------
@@ -751,6 +781,8 @@ def match_ground_truth_to_page(
     # Deterministic safety net for the main body (handles pages where the
     # matcher couldn't align a badly-garbled transcription to the GT).
     out = _fill_unmatched_gt(out, gt_page)
+    # Layer the eHD gold-standard entity annotations onto the matched GT text.
+    out = _attach_gt_entities(out, gt_page)
     return out
 
 
@@ -828,6 +860,7 @@ def fill_missing_body_ground_truth(
             continue
         before = sum(1 for r in result.regions if r.ground_truth_content)
         result.regions = _fill_unmatched_gt(result.regions, gt_page)
+        result.regions = _attach_gt_entities(result.regions, gt_page)
         gained = sum(1 for r in result.regions if r.ground_truth_content) - before
         if gained > 0:
             pages_fixed += 1
