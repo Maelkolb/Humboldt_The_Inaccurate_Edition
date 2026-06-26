@@ -279,25 +279,89 @@ def _collect_languages(elem) -> List[str]:
 # Named entity extraction
 # ---------------------------------------------------------------------------
 
-def _collect_entities(elem) -> List[Dict[str, str]]:
+# eHD register ids look like "H" + digits (e.g. H0006403). In a body @ref they
+# may appear bare, as a local pointer ("#H0006403"), or inside a full
+# edition-humboldt.de URL — we extract the id wherever it sits.
+_EHD_ID_RE = re.compile(r"(H\d{4,})")
+_EHD_URL = "https://edition-humboldt.de/v11/{}"
+# Hints that a non-eHD ref points at an external authority record.
+_EXTERNAL_AUTHORITY_HINTS = (
+    "d-nb.info", "/gnd/", "viaf.org", "geonames.org", "gbif.org", "wikidata.org",
+)
+
+
+def _entity_ref_of(node) -> str:
+    """Return the first authority pointer on a TEI entity element.
+
+    eHD uses @ref; @key/@corresp/@sameAs are accepted as fallbacks so the
+    collector is robust to minor encoding variations across eHD files.
     """
-    Extract named entities from TEI persName / placeName / orgName elements.
-    Returns list of {text, entity_type, normalized_form, language} dicts.
+    for attr in ("ref", "key", "corresp", "sameAs"):
+        v = node.get(attr)
+        if v and v.strip():
+            return v.strip()
+    return ""
+
+
+def _resolve_entity_ref(
+    ref: str,
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Resolve a TEI entity @ref into (ehd_id, ehd_url, authority_uri).
+
+    Handles the forms eHD bodies use in practice:
+      * "#H0006403" / "H0006403"   -> eHD register id + v11 URL
+      * ".../v11/H0006403"         -> same (id extracted from the URL)
+      * an external authority URI (GND/VIAF/GeoNames/GBIF) -> authority_uri
+    A ref may carry only one of these; whatever is present is filled, the rest
+    left None. Empty/whitespace refs yield (None, None, None).
     """
-    entities = []
+    ref = (ref or "").strip()
+    if not ref:
+        return None, None, None
+    ehd_id = ehd_url = authority_uri = None
+    m = _EHD_ID_RE.search(ref)
+    if m:
+        ehd_id = m.group(1)
+        ehd_url = _EHD_URL.format(ehd_id)
+    is_ehd_edition = "edition-humboldt" in ref
+    if not is_ehd_edition and (
+        ref.startswith(("http://", "https://"))
+        or any(h in ref for h in _EXTERNAL_AUTHORITY_HINTS)
+    ):
+        authority_uri = ref
+    return ehd_id, ehd_url, authority_uri
+
+
+def _entity_record(node, etype: str) -> Optional[Dict[str, Optional[str]]]:
+    """Build a raw entity dict {text, entity_type, ref, normalized_form,
+    language} from a single TEI entity element, or None if it has no text."""
+    text = _get_all_text(node).strip()
+    if not text:
+        return None
+    ref = _entity_ref_of(node)
+    lang = (node.get(f"{XML}lang") or "")[:2].lower() or None
+    return {
+        "text": text,
+        "entity_type": etype,
+        "ref": ref,
+        # Back-compat: external refs were previously surfaced as normalized_form.
+        "normalized_form": ref if ref and not ref.startswith("#") else None,
+        "language": lang,
+    }
+
+
+def _collect_entities(elem) -> List[Dict[str, Optional[str]]]:
+    """
+    Extract named entities from TEI persName / placeName / orgName elements
+    found anywhere under ``elem``. Returns a list of raw entity dicts
+    (see :func:`_entity_record`); the @ref is preserved for later resolution.
+    """
+    entities: List[Dict[str, Optional[str]]] = []
     for tag, etype in _TEI_ENT_MAP.items():
         for node in elem.findall(f".//{TEI}{tag}"):
-            text = _get_all_text(node).strip()
-            if not text:
-                continue
-            ref = node.get("ref", "")
-            lang = (node.get(f"{XML}lang") or "")[:2].lower() or None
-            entities.append({
-                "text": text,
-                "entity_type": etype,
-                "normalized_form": ref if ref and not ref.startswith("#") else None,
-                "language": lang,
-            })
+            rec = _entity_record(node, etype)
+            if rec:
+                entities.append(rec)
     return entities
 
 
@@ -323,6 +387,7 @@ class _PageCollector:
             "notes": [],        # list of lxml elements
             "figures": [],      # list of lxml elements
             "fw": [],           # list of lxml elements
+            "entities": [],     # raw entity dicts recorded from the main text
         }
         self._pages.append(self._current)
 
@@ -460,6 +525,21 @@ class _PageCollector:
                 self._push(_get_all_text(reg))
             elif expan is not None:
                 self._push(_get_all_text(expan))
+            if elem.tail:
+                self._push(elem.tail)
+            return
+
+        # Named entity in the running text: record it (with its @ref) for the
+        # page's entity list, then fall through to pass-through so the surface
+        # text still lands in text_parts exactly as before.
+        if local in _TEI_ENT_MAP and self._current is not None:
+            rec = _entity_record(elem, _TEI_ENT_MAP[local])
+            if rec:
+                self._current["entities"].append(rec)
+            if elem.text:
+                self._push(elem.text)
+            for child in elem:
+                self.walk(child)
             if elem.tail:
                 self._push(elem.tail)
             return
@@ -611,33 +691,45 @@ def _build_page_regions(page_data: Dict[str, Any], page_idx: int) -> List[Region
 
 def _build_page_entities(page_data: Dict[str, Any]) -> List[Entity]:
     """
-    Extract TEI-tagged named entities from all elements in the page.
-    We build a fake root element so we can search across the entire page.
+    Build the page's named-entity list from TEI persName / placeName / orgName.
+
+    Sources, in priority order (first occurrence of a (text, type) pair wins):
+      1. the main text  — recorded during the page walk (page_data["entities"]),
+      2. manuscript notes and figures — scanned from the retained elements.
+
+    Each entity's @ref is resolved into the eHD register id + v11 URL and/or an
+    external authority URI, so GT-tab annotations link straight to the gold
+    record without any further linking pass.
     """
-    # We need to search across the text portions too, but those are plain strings.
-    # Collect entities from the lxml element trees we kept (notes, figures).
     entities: List[Entity] = []
     seen: set = set()
 
-    def _add_from_elem(elem):
-        for item in _collect_entities(elem):
-            key = (item["text"], item["entity_type"])
-            if key in seen:
-                continue
-            seen.add(key)
-            entities.append(Entity(
-                text=item["text"],
-                entity_type=item["entity_type"],
-                start_char=-1,
-                end_char=-1,
-                normalized_form=item.get("normalized_form"),
-                language=item.get("language"),
-            ))
+    def _emit(item: Dict[str, Optional[str]]) -> None:
+        key = (item["text"], item["entity_type"])
+        if key in seen:
+            return
+        seen.add(key)
+        ehd_id, ehd_url, authority_uri = _resolve_entity_ref(item.get("ref") or "")
+        entities.append(Entity(
+            text=item["text"],
+            entity_type=item["entity_type"],
+            start_char=-1,
+            end_char=-1,
+            normalized_form=item.get("normalized_form"),
+            language=item.get("language"),
+            ehd_id=ehd_id,
+            ehd_url=ehd_url,
+            authority_uri=authority_uri,
+        ))
 
+    for item in page_data.get("entities", []):
+        _emit(item)
     for note in page_data["notes"]:
-        _add_from_elem(note)
+        for item in _collect_entities(note):
+            _emit(item)
     for fig in page_data["figures"]:
-        _add_from_elem(fig)
+        for item in _collect_entities(fig):
+            _emit(item)
 
     return entities
 
