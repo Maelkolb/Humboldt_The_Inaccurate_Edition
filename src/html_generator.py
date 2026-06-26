@@ -495,7 +495,16 @@ def _render_region_text(
     if gt is None or gt == "":
         return gemini_html
 
-    gt_html = _render_gt_plain(gt)
+    # Ground-truth text: annotate with the eHD gold-standard entities attached
+    # by ground_truth.py (clickable register/authority links via _annotate_text).
+    # Falls back to plain rendering when none are present (e.g. TEI-only mode or
+    # a region whose GT slice has no tagged entities).
+    gt_entities = getattr(region, "ground_truth_entities", None) or []
+    gt_html = (
+        _annotate_text(gt, gt_entities, ec)
+        if gt_entities
+        else _render_gt_plain(gt)
+    )
     diff_html = _render_diff(region.content or "", gt)
 
     conf = region.ground_truth_confidence
