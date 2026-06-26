@@ -54,6 +54,11 @@ class Region:
     # Ground-truth comparison (populated only when --ground-truth-tei is used)
     ground_truth_content: Optional[str] = None       # GT text matched to this region
     ground_truth_confidence: Optional[float] = None  # 0..1 confidence of the match
+    # eHD gold-standard entity annotations (persName/placeName/orgName from the
+    # GT TEI, already carrying register/authority refs) whose surface form
+    # appears in this region's ground_truth_content. Populated by ground_truth.py.
+    # Quoted annotation: Entity is defined below Region in this module.
+    ground_truth_entities: "List[Entity]" = field(default_factory=list)
     # Pre-consistency-check snapshots (populated only when the consistency
     # check runs). These let us inspect/compare what Gemini transcribed
     # BEFORE the consistency QA pass touched it.
@@ -94,6 +99,10 @@ class Region:
             d["ground_truth_content"] = self.ground_truth_content
         if self.ground_truth_confidence is not None:
             d["ground_truth_confidence"] = self.ground_truth_confidence
+        if self.ground_truth_entities:
+            d["ground_truth_entities"] = [
+                entity_to_dict(e) for e in self.ground_truth_entities
+            ]
         if self.content_pre_consistency is not None:
             d["content_pre_consistency"] = self.content_pre_consistency
         if self.uncertain_readings_pre_consistency is not None:
@@ -121,6 +130,9 @@ class Region:
             tei_id=d.get("tei_id"),
             ground_truth_content=d.get("ground_truth_content"),
             ground_truth_confidence=d.get("ground_truth_confidence"),
+            ground_truth_entities=[
+                entity_from_dict(e) for e in d.get("ground_truth_entities", [])
+            ],
             content_pre_consistency=d.get("content_pre_consistency"),
             uncertain_readings_pre_consistency=d.get("uncertain_readings_pre_consistency"),
         )
@@ -180,6 +192,27 @@ def entity_to_dict(e: "Entity") -> Dict:
         if e.link_candidates:
             d["link_candidates"] = e.link_candidates
     return d
+
+
+def entity_from_dict(e: Dict) -> "Entity":
+    """Reconstruct an Entity from its serialised dict (inverse of entity_to_dict)."""
+    return Entity(
+        text=e["text"],
+        entity_type=e["entity_type"],
+        start_char=e.get("start_char", -1),
+        end_char=e.get("end_char", -1),
+        context=e.get("context"),
+        normalized_form=e.get("normalized_form"),
+        language=e.get("language"),
+        ehd_id=e.get("ehd_id"),
+        ehd_url=e.get("ehd_url"),
+        authority_uri=e.get("authority_uri"),
+        authority_label=e.get("authority_label"),
+        link_method=e.get("link_method"),
+        link_score=e.get("link_score"),
+        link_ambiguous=e.get("link_ambiguous", False),
+        link_candidates=e.get("link_candidates", []),
+    )
 
 
 @dataclass
