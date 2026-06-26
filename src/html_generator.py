@@ -30,6 +30,7 @@ import io
 import json
 import logging
 import re
+import unicodedata
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -285,16 +286,60 @@ def _norm_ws(text: str) -> str:
     return _WS_COLLAPSE_RE.sub(" ", (text or "")).strip()
 
 
-# For CER/WER only: drop editorial markup (<u>…</u>, ~~struck~~, [...] / [?])
-# and punctuation so the score reflects the transcription, not the apparatus.
-# The Diff tab does NOT use this — it keeps punctuation and markup as-is.
+# CER/WER normalisation. BOTH the hypothesis (Gemini) and the reference (GT)
+# are normalised identically before scoring, so the metric reflects how well
+# the text was *read* rather than incidental encoding/layout differences. In
+# order, we remove:
+#   1. Unicode form differences (NFC) ............ precomposed vs combining
+#   2. editorial apparatus (<u>, ~~…~~, [...] / [?]) ... not transcription
+#   3. historical glyph variants (long-s, ligatures, dash variants) ... same text
+#   4. line-break hyphenation ("Trow-\nbridge" → "Trowbridge") ... layout, not text
+#   5. (optional) diacritics ..................... OFF: é≠e is meaningful here
+#   6. (optional) punctuation .................... ON: ignore punctuation noise
+#   7. (optional) letter case .................... ON: London == london
+#   8. whitespace runs
+# Steps 1–4 are uncontroversial (they only cancel encoding/layout noise). Steps
+# 6–7 make the metric more lenient and are deliberate editorial choices — flip
+# the flags below to harden or relax the score, and state which you used when
+# reporting CER/WER. The scoring itself is exact Levenshtein; no fuzzy matching.
+_METRIC_FOLD_CASE = True         # treat "London" and "london" as equal
+_METRIC_DROP_PUNCT = True        # ignore punctuation differences
+_METRIC_FOLD_DIACRITICS = False  # keep accents distinct (é ≠ e)
+
 _METRIC_MARKUP_RE = re.compile(r"</?u>|~~|\[[^\]]*\]")
 _METRIC_PUNCT_RE = re.compile(r"[^\w\s]", re.UNICODE)
+# Soft hyphen (U+00AD) or an ASCII hyphen immediately followed by whitespace:
+# the latter is line-break hyphenation once dash variants are unified (step 3).
+_METRIC_HYPHEN_BREAK_RE = re.compile(r"\u00ad|-\s+")
+# Glyph variants that are the *same* reading: long-s, typographic ligatures,
+# and the various Unicode dashes (mapped to ASCII "-" so step 4 can rejoin).
+_METRIC_GLYPHS = str.maketrans({
+    "ſ": "s",
+    "ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st",
+    "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "―": "-",
+})
+
+
+def _strip_diacritics(text: str) -> str:
+    """Drop combining marks (é → e). Used for CER/WER only when the diacritic
+    fold flag is enabled."""
+    return "".join(
+        c for c in unicodedata.normalize("NFKD", text)
+        if not unicodedata.combining(c)
+    )
 
 
 def _norm_for_metrics(text: str) -> str:
-    t = _METRIC_MARKUP_RE.sub(" ", text or "")
-    t = _METRIC_PUNCT_RE.sub("", t)
+    t = unicodedata.normalize("NFC", text or "")
+    t = _METRIC_MARKUP_RE.sub(" ", t)        # editorial apparatus
+    t = t.translate(_METRIC_GLYPHS)          # long-s, ligatures, dash variants
+    t = _METRIC_HYPHEN_BREAK_RE.sub("", t)   # rejoin line-broken words
+    if _METRIC_FOLD_DIACRITICS:
+        t = _strip_diacritics(t)
+    if _METRIC_DROP_PUNCT:
+        t = _METRIC_PUNCT_RE.sub("", t)
+    if _METRIC_FOLD_CASE:
+        t = t.lower()
     return _norm_ws(t)
 
 
@@ -338,14 +383,16 @@ def _cer_wer_for_main_text(
         gt = r.ground_truth_content
         if not gt:
             continue
-        hyp_parts.append(_norm_for_metrics(r.content or ""))
-        ref_parts.append(_norm_for_metrics(gt))
+        hyp_parts.append(r.content or "")
+        ref_parts.append(gt)
         n += 1
     if n == 0:
         return None
 
-    hyp = _norm_ws(" ".join(hyp_parts))
-    ref = _norm_ws(" ".join(ref_parts))
+    # Join with newlines (not spaces) so a word hyphenated across the region
+    # boundary still rejoins, then normalise the whole thing once.
+    hyp = _norm_for_metrics("\n".join(hyp_parts))
+    ref = _norm_for_metrics("\n".join(ref_parts))
     if not ref:
         return None
 
