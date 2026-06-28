@@ -1,11 +1,16 @@
 """humboldt-edition – LLM pipeline for Humboldt journal digitization."""
 from .models import Entity, GeoLocation, Region, RegionType, PageResult
 from .pipeline import process_book, process_page, load_results_from_json
-from .html_generator import generate_html_edition
+from .html_generator import (
+    generate_html_edition,
+    build_edition_bundle,
+    zip_bundle,
+)
 from .geocoding import geocode_entities
 from .region_detection import detect_regions
-from .transcription import transcribe_regions
-from .consistency_check import check_and_fix_regions
+from .whole_page_reading import read_whole_page
+from .transcription import transcribe_regions_ensemble
+from .layout import resolve_layout
 from .ner import perform_ner
 from .entity_register import EntityRegister, RegisterEntry, LinkMatch
 from .entity_linking import (
@@ -40,10 +45,13 @@ __all__ = [
     "process_page",
     "load_results_from_json",
     "generate_html_edition",
+    "build_edition_bundle",
+    "zip_bundle",
     "geocode_entities",
     "detect_regions",
-    "transcribe_regions",
-    "check_and_fix_regions",
+    "read_whole_page",
+    "transcribe_regions_ensemble",
+    "resolve_layout",
     "perform_ner",
     "EntityRegister",
     "RegisterEntry",

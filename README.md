@@ -19,8 +19,8 @@ This pipeline addresses all of these with custom region types, editorial convent
 | Step | Module | Description |
 |------|--------|-------------|
 | 1. Region Detection | `region_detection.py` | Identifies Humboldt-specific regions: entry headings, main text, marginal notes, calculation blocks, observation tables, sketches, crossed-out passages, interlinear additions, bibliographic references, coordinates, instrument lists |
-| 2. Transcription | `transcription.py` | Scholarly diplomatic transcription, tracking languages, noting editorial observations |
-| 2.5. Consistency Check | `consistency_check.py` | **Multimodal QA pass.** Looks at the page image alongside every region and (a) fixes structural problems like duplicate lines, contaminated main-text, language mismatches, and (b) attempts to resolve every word marked `[?]` directly from the ink, dropping the marker only when a confident reading can be supplied. Each region keeps a snapshot (`content_pre_consistency`, `uncertain_readings_pre_consistency`) of what Gemini originally produced in Step 2 so the effect of the QA pass can be inspected per region; the HTML viewer exposes this through a **Raw** toggle when something actually changed. |
+| 2. Transcription | `transcription.py` | Each detected region is cropped from the page (with generous margins) and transcribed on its **own** focused request, in parallel. Short per-region-type prompts replace the former single whole-page call with the full rulebook, keeping the model's attention on one region at a time. Tracks languages and table structure; defers editorial/structural judgement to Step 2.5. |
+| 2.5. Consistency Check | `consistency_check.py` | **Multimodal whole-page QA pass** — now the home of the editorial rulebook. Looking at the page image alongside every region, it (a) reconciles overlapping/duplicate transcript lines that the padded per-region crops can introduce, deciding line ownership from the bounding boxes, and fixes contaminated main-text and language mismatches; (b) supplies editorial interpretation (marginal role, writing layer); and (c) attempts to resolve every word marked `[?]` directly from the ink, dropping the marker only on a confident reading. Each region keeps a snapshot (`content_pre_consistency`, `uncertain_readings_pre_consistency`) of the Step-2 output so the QA pass can be audited per region. |
 | 3. Entity Annotation | `ner.py` | NER for persons, locations, institutions, instruments, publications, celestial objects, measurements, natural objects |
 | 4. Georeferencing | `geocoding.py` | Location resolution with a historical place-name mapping (Oedenburg→Sopron, Preßburg→Bratislava, etc.) |
 | 4.5. Geolocation Validation | `geo_consistency.py` | **Text-based QA pass.** Runs after NER + geocoding and judges, from the page text alone, whether each resolved coordinate plausibly is the place Humboldt named. Implausible hits (non-places, wrong-continent homonyms, misread fragments that latched onto an unrelated famous place) are dropped; per-location verdicts are stored in `geo_validation` for auditing. Conservative and fails open. |
@@ -97,14 +97,23 @@ output/
 │   └── ...
 ├── digital_edition_complete.json     # All results
 ├── digital_edition.tei.xml           # Full-book TEI XML (always written)
-├── humboldt_edition.html             # Interactive scholarly HTML edition
-│                                     # • side-by-side facsimile + transcription
-│                                     # • per-page "TEI" download button
-│                                     # • Gemini / Ground Truth / Diff toggle
-│                                     #   (only on pages where --ground-truth-tei
-│                                     #    produced a match)
+├── humboldt_edition/                 # Self-contained edition bundle
+│   ├── index.html                    #   • side-by-side facsimile + transcription
+│   ├── assets/edition.css            #   • stylesheet (external)
+│   ├── assets/edition.js             #   • behaviour: nav, zoom, search, toggles
+│   ├── tei/folio_<label>.tei.xml     #   • one real TEI file per folio (download)
+│   ├── tei/digital_edition.tei.xml   #   • full-book TEI (copied in)
+│   └── facsimiles/<image>            #   • page images (unless --embed-images
+│                                     #     or --image-ref-prefix is used)
+├── humboldt_edition.zip              # The bundle above, zipped for distribution
 └── geocode_cache.json
 ```
+
+The HTML edition offers a Gemini / Ground Truth / Diff toggle (only on pages
+where `--ground-truth-tei` produced a match), a Document/Reading view switch,
+per-page TEI download, entity highlighting, and a Leaflet map of geolocated
+places.
+
 
 ## Editorial Conventions
 

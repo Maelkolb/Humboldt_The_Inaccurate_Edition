@@ -19,20 +19,60 @@ GEMINI_API_KEY: str = os.environ.get("GEMINI_API_KEY", "")
 # Default model used for ALL stages unless overridden below.
 MODEL_ID: str = os.environ.get("MODEL_ID") or "gemini-3-flash-preview"
 
-# Per-stage model overrides (optional).
-# Set to a Gemini model ID (e.g. "gemini-3.1-pro-preview",
-# "gemini-3.1-flash-lite-preview") to use a different model for that stage.
-# Leave as None to fall back to MODEL_ID.
+# The most capable Flash model — used for the per-region merge resolver and the
+# layout pass (both are reasoning/selection tasks). Overridable via env.
+MODEL_ID_BEST: str = os.environ.get("MODEL_ID_BEST") or "gemini-3.5-flash"
+
+# Per-stage model overrides (None → the stage default below, ultimately MODEL_ID).
 # Each can also be set via an environment variable of the same name.
-MODEL_ID_LAYOUT:        str | None = os.environ.get("MODEL_ID_LAYOUT")        or None
-MODEL_ID_TRANSCRIPTION: str | None = os.environ.get("MODEL_ID_TRANSCRIPTION") or None
-MODEL_ID_CONSISTENCY:   str | None = os.environ.get("MODEL_ID_CONSISTENCY")   or None
+MODEL_ID_LAYOUT:        str | None = os.environ.get("MODEL_ID_LAYOUT")        or None  # region detection
+MODEL_ID_TRANSCRIPTION: str | None = os.environ.get("MODEL_ID_TRANSCRIPTION") or None  # M1/M2/M3 reads
+MODEL_ID_MERGE:         str | None = os.environ.get("MODEL_ID_MERGE")         or None  # merge + layout pass
 MODEL_ID_NER:           str | None = os.environ.get("MODEL_ID_NER")           or None
 MODEL_ID_GEO_VALIDATION: str | None = os.environ.get("MODEL_ID_GEO_VALIDATION") or None
 
+# Smart-stage default (merge resolver + layout pass): the best model.
+MODEL_ID_MERGE_DEFAULT: str = MODEL_ID_MERGE or MODEL_ID_BEST
+
+# The M3 (structured whole-page) read deliberately uses a DIFFERENT model from the
+# M1 crop / M2 free reads, so the ensemble gets heterogeneous candidates (two model
+# families) for the alignment-locked merge to draw on. Defaults to the best model.
+MODEL_ID_STRUCTURED: str = os.environ.get("MODEL_ID_STRUCTURED") or MODEL_ID_BEST
+
 THINKING_LEVEL: str = "medium"  # default fallback
-THINKING_LEVEL_LAYOUT: str = "high"  # complex layouts need deeper reasoning
-THINKING_LEVEL_TRANSCRIPTION: str = "low"  # transcription is more straightforward
+THINKING_LEVEL_LAYOUT: str = "high"          # region detection (complex layouts)
+THINKING_LEVEL_TRANSCRIPTION: str = "low"    # M1/M2 reads
+THINKING_LEVEL_STRUCTURED: str = os.environ.get("THINKING_LEVEL_STRUCTURED") or "medium"  # M3 (diverse)
+THINKING_LEVEL_MERGE: str = os.environ.get("THINKING_LEVEL_MERGE") or "medium"  # merge + layout pass
+
+# Sampling temperature. ``None`` = API default. Env-overridable.
+def _opt_float(name: str, default):
+    v = os.environ.get(name)
+    return float(v) if v not in (None, "") else default
+
+TEMPERATURE_READ: float = _opt_float("TEMPERATURE_READ", 0.2)            # M1 crop + M2 whole-page
+TEMPERATURE_READ_STRUCTURED: float = _opt_float("TEMPERATURE_READ_STRUCTURED", 1.0)  # M3 (diverse)
+TEMPERATURE_MERGE: float = _opt_float("TEMPERATURE_MERGE", 0.0)          # merge + layout selection
+
+# Global cap on simultaneous Gemini calls across the whole run (every stage, every
+# folio, every worker). The single throttle: raise it on a high API tier, lower it
+# if you see 429s. Backoff (src/llm.py) handles any overflow.
+LLM_MAX_CONCURRENCY: int = int(os.environ.get("LLM_MAX_CONCURRENCY", "8"))
+
+# ---------------------------------------------------------------------------
+# Ensemble transcription (the reading path)
+# ---------------------------------------------------------------------------
+# Each region gets HETEROGENEOUS candidates — k_crop per-region crop reads (M1)
+# plus two whole-page reads (M2 free, M3 structured), keyed by region_index. They
+# are merged by ALIGNMENT-LOCKED consensus: tokens all candidates agree on are
+# locked in code; only disagreements are resolved by the best model from the crop
+# (+page). A final whole-page LAYOUT pass dedups/contamination/bleed.
+ENSEMBLE_K_CROP: int = int(os.environ.get("ENSEMBLE_K_CROP", "1"))
+MERGE_CROP_MAX_PX: int = int(os.environ.get("MERGE_CROP_MAX_PX", "1600"))  # crop res for the merge
+# Attach the whole page to each merge call (alongside the crop) for layout context.
+MERGE_WITH_PAGE: bool = os.environ.get("MERGE_WITH_PAGE", "1") not in ("0", "false", "False")
+# Whole-page image resolution for the M2/M3 reads, merge page-context, and layout.
+PAGE_READ_MAX_PX: int = int(os.environ.get("PAGE_READ_MAX_PX", "2000"))
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -81,66 +121,69 @@ REGION_TYPES: list[str] = [
     "observation_table",    # structured observational data (angles, times, measurements)
     "sketch",               # pen drawings, landscape profiles, plant/animal diagrams
     "crossed_out",          # large struck-through sections (multiple lines, whole pages)
-    "bibliographic_ref",    # citation of a publication, atlas, or other work
-    "coordinates",          # geographic coordinate notations
     "instrument_list",      # lists of scientific instruments (often with prices)
     "page_number",          # folio number (usually top corner)
 ]
 
 # ---------------------------------------------------------------------------
-# Entity types – adapted for Humboldt's American travel journals
-# Context: Venezuelan and South American field research (1799–1804)
+# Entity types – generic across Humboldt's travel journals. Examples span all
+# three corpora: England (1790, e.g. Wiltshire/wool/geology), the American
+# equinoctial regions (1799–1804, e.g. Cumaná/Orinoco), and the European trip
+# (1797/98: Dresden, Wien, Salzburg). Descriptions are journal-agnostic so the
+# same NER config works on any of them.
 # ---------------------------------------------------------------------------
 
 ENTITY_TYPES: dict[str, str] = {
     "Person": (
-        "Namentlich genannte Person: Wissenschaftler, Missionare, Gouverneure, "
-        "Conquistadoren, Entdecker, Reisegefährten, lokale Informanten. "
-        "(z.B. 'Bonpland', 'Bello', 'Depons', 'Fray', 'Pater'). "
-        "Auch mit Titel (Fr., P., Don, Sr.) und abgekürzten Vornamen. "
-        "KEINE generischen Bezeichnungen wie 'los Indios' oder 'los Misioneros'."
+        "Namentlich genannte Person: Wissenschaftler, Astronomen, Instrumentenbauer, "
+        "Missionare, Beamte, Reisegefährten, Handwerker, lokale Informanten. "
+        "(z.B. 'Bonpland', 'Depons' [Amerika]; 'Bouvard', 'Köhler', 'Niebuhr' [Europa]; "
+        "'Anderson', 'Bird' [England]). "
+        "Auch mit Titel (Fr., P., Don, Sr., S., Hr.) und abgekürzten Vornamen. "
+        "KEINE generischen Bezeichnungen wie 'die Indios', 'die Bauern', 'der Wirt'."
     ),
     "Location": (
-        "Konkret benannter Ort: Städte, Dörfer, Missionen, Häfen, Provinzen, "
-        "Landschaften, Küstenabschnitte. Spanische und indigene Ortsnamen. "
-        "(z.B. 'Cumaná', 'Caracas', 'Villa de Cura', 'Nueva Barcelona', "
-        "'Cerro de Ávila', 'Llanos'). "
+        "Konkret benannter Ort: Städte, Dörfer, Häfen, Provinzen, Landschaften, "
+        "Gebirge, Flüsse, Missionen, Festungen. "
+        "(z.B. 'Cumaná', 'Caracas', 'Orinoco' [Amerika]; 'Dresden', 'Wien', 'Salzburg', "
+        "'Königstein', 'Elbe' [Europa]; 'Wiltshire', 'Bristol', 'Matlock' [England]). "
         "KEINE relativen Angaben wie 'im Süden' oder generische Bezeichnungen."
     ),
     "Indigenous_Group": (
-        "Indigenes Volk, Ethnie, Sprachgruppe oder Stamm in Venezuela/Südamerika. "
-        "(z.B. 'Chaymas', 'Caribe', 'Guayqueri', 'Cumanagoto', 'Tamanac', "
-        "'Maypure', 'Atures'). "
-        "Auch Bezeichnungen wie 'Indios de...' wenn ethnisch spezifisch."
+        "Indigenes Volk, Ethnie, Sprachgruppe oder Stamm (v.a. in den amerikanischen "
+        "Tagebüchern). (z.B. 'Chaymas', 'Caribe', 'Guayqueri', 'Cumanagoto', 'Tamanac', "
+        "'Maypure'). Auch 'Indios de...' wenn ethnisch spezifisch. "
+        "Tritt in den europäischen/englischen Tagebüchern kaum auf."
     ),
     "Instrument": (
         "Wissenschaftliches Instrument oder Messgerät. "
-        "(z.B. 'Sextant', 'Chronometer', 'Barometer', 'Dipping needle', "
-        "'Cercle de Borda', 'Lunette de Dollond', 'Magnetometer'). "
-        "Auch mit Herstellernamen kombiniert."
+        "(z.B. 'Sextant', 'Chronometer', 'Barometer', 'Thermometer', 'Cercle de Borda', "
+        "'Lunette de Dollond', 'Pistor-Kreis', 'Libelle', 'Magnetnadel'). "
+        "Auch mit Herstellernamen (z.B. 'Bird', 'Dollond', 'Pistor')."
     ),
     "Species": (
-        "Biologische Art oder Gattung (Pflanze, Tier, Mineral): Latein oder Volksname. "
-        "(z.B. 'Croton', 'Hevea', 'Jaguar', 'Caiman', 'Elektrischer Aal', "
-        "'Manatí', 'Cacao', 'Vanilla', 'Cassia', 'Loxia'). "
-        "Auch neu beschriebene Arten und lokale Namen mit botanischem Kontext. "
-        "NICHT allgemeine Begriffe wie 'Baum', 'Vogel' ohne Artname."
+        "Biologische Art/Gattung (Pflanze, Tier) ODER Mineral/Gestein: Latein oder Volksname. "
+        "(z.B. 'Croton', 'Hevea', 'Jaguar', 'Cacao', 'Manatí' [Amerika]; "
+        "'Schaf', 'Wolle' [England]; 'Basalt', 'Schiefer', 'Toadstone', 'Röthel' "
+        "[Mineralogie/Geologie]). "
+        "NICHT allgemeine Begriffe wie 'Baum' oder 'Vogel' ohne Artname."
     ),
     "Publication": (
         "Namentlich genanntes Buch, Karte, Zeitschrift, Traktat oder Atlas. "
-        "(z.B. 'Reise in die Äquinoktial-Gegenden', 'Relation historique', "
-        "'Flora peruviana', 'Humboldt und Bonpland'). "
+        "(z.B. 'Relation historique', 'Flora peruviana' [Amerika]; 'd'Anville' [Karte]; "
+        "'report of the Committee of the Highland Society' [England]). "
         "Inkl. Autor + Titel-Kombinationen."
     ),
     "Celestial_Object": (
         "Astronomisches Objekt: Stern, Planet, Sonne, Mond, Sternbild. "
         "(z.B. 'Sonne', 'Mond', 'Jupiter', 'α Orionis', 'Kreuz des Südens'). "
-        "Nur im astronomischem/navigatorischen Beobachtungskontext."
+        "Nur im astronomischen/navigatorischen Beobachtungskontext."
     ),
     "Measurement": (
-        "Konkrete Messung mit Wert und Einheit: geographische Breite/Länge, "
-        "Temperatur, Luftdruck, magnetische Deklination/Inklination, Meereshöhe. "
-        "(z.B. '10° 27' N', '23° Réaumur', '780 Toisen', '4° 21' östl.'). "
+        "Konkrete Messung mit Wert und Einheit: geographische Breite/Länge (Koordinaten), "
+        "Temperatur, Luftdruck (Barometerstand), magnetische Deklination/Inklination, "
+        "Höhe/Meereshöhe. "
+        "(z.B. '10° 27' N', '51° 2' 54'' Breite', '23° Réaumur', '780 Toisen', '338 t.'). "
         "Nur markante, identifizierbare Werte, nicht jede beliebige Zahl."
     ),
 }
@@ -184,8 +227,6 @@ REGION_COLORS: dict[str, str] = {
     "observation_table": "#006064",
     "sketch":            "#4e342e",
     "crossed_out":       "#b71c1c",
-    "bibliographic_ref": "#3e2723",
-    "coordinates":       "#0d47a1",
     "instrument_list":   "#bf360c",
     "page_number":       "#78909c",
 }
@@ -199,8 +240,6 @@ REGION_LABELS: dict[str, str] = {
     "observation_table": "Observation Table",
     "sketch":            "Sketch",
     "crossed_out":       "Crossed Out",
-    "bibliographic_ref": "Bibliographic Ref.",
-    "coordinates":       "Coordinates",
     "instrument_list":   "Instrument List",
     "page_number":       "Page No.",
 }

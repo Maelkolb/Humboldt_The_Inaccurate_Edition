@@ -1,11 +1,8 @@
-"""
-Entity Linking & Consistency – Humboldt Journal Edition
-=======================================================
-A deterministic, offline post-processing module. It runs SEPARATELY, AFTER the
-main pipeline has finished, over the produced ``digital_edition_complete.json``
-(see ``scripts/link_entities.py``); it is not wired into ``process_book``. It
-operates on the Person / Location / Species entities the NER stage emitted and
-does two things:
+"""Deterministic, offline entity linking + consistency check.
+
+Runs separately after the pipeline over ``digital_edition_complete.json`` (see
+``scripts/link_entities.py``); not wired into ``process_book``. On the
+Person/Location/Species entities from NER it does two things:
 
 1. LINKING – resolves every Person / Location / Species entity emitted by the
    NER stage against the *edition humboldt digital* authority register

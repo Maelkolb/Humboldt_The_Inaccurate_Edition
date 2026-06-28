@@ -1,10 +1,11 @@
-output/
+output*/
 images/
 __pycache__/
 *.pyc
 .env
 .venv/
 *.egg-info/
+notebooks/
 ehd_register_index.json
 ehd_index.json
 *_linked.json

@@ -1,21 +1,11 @@
-"""
-Geolocation Consistency Check (Step 4.5) – Humboldt Journal Edition
-===================================================================
-A text-based quality gate that runs AFTER NER (Step 3) and Geocoding
-(Step 4). Geocoders such as Wikidata/Nominatim happily return a coordinate
-for almost any string, so a misread place name or an ambiguous homonym can
-resolve to somewhere that makes no sense for Humboldt's journal (e.g. a town
-in the United States standing in for a Venezuelan village, or a Wikidata item
-that is not a geographic place at all).
+"""Text-based plausibility gate for geocoding results.
 
-This module asks the model to judge — from the page text alone, no image —
-whether each resolved :class:`~src.models.GeoLocation` plausibly is the place
-Humboldt actually named. Locations judged invalid with sufficient confidence
-are dropped; everything else is kept, so only sensible geocoding results reach
-the edition. The per-location verdicts are returned for auditing.
-
-The check is conservative and fails open: on any error it keeps every
-location untouched.
+Geocoders return a coordinate for almost any string, so a misread or ambiguous
+place name can resolve somewhere implausible for Humboldt's journal. The model
+judges, from the page text alone, whether each resolved
+:class:`~src.models.GeoLocation` is the place actually named; confidently invalid
+ones are dropped. Per-location verdicts are returned for auditing. Fails open
+(keeps everything) on any error.
 """
 
 from __future__ import annotations
@@ -25,9 +15,8 @@ import logging
 from typing import Any, Dict, List, Tuple
 
 from google import genai
-from google.genai import types
 
-from .json_utils import parse_json_robust
+from .llm import generate_json
 from .models import Entity, GeoLocation
 
 logger = logging.getLogger(__name__)
@@ -133,26 +122,13 @@ def validate_locations(
         locations_json=locations_json,
     )
 
-    data: Any = []
-    for attempt in range(1, 3):
-        try:
-            response = client.models.generate_content(
-                model=model_id,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level=thinking_level
-                    ),
-                    response_mime_type="application/json",
-                ),
-            )
-            data = parse_json_robust(response.text)
-            if isinstance(data, list):
-                break
-        except Exception as exc:
-            logger.error(
-                "Geo-validation error (attempt %d/2): %s", attempt, exc
-            )
+    data = generate_json(
+        client, model_id, prompt,
+        thinking_level=thinking_level,
+        default=[],
+        max_attempts=2,
+        stage="geo_validation",
+    )
 
     if not isinstance(data, list):
         logger.warning("Geo-validation returned no usable verdict; keeping all.")

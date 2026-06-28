@@ -1,15 +1,10 @@
-"""
-Geocoding (Step 4) – Humboldt Journal Edition
-==============================================
-Resolves Location entities to geographic coordinates and GeoNames IDs.
+"""Resolve Location entities to coordinates + GeoNames IDs.
 
-Resolution order:
-1. Wikidata (primary) – returns coordinates + GeoNames ID + Wikidata QID
-2. Nominatim / OpenStreetMap (fallback)
-
+Resolution order: Wikidata (coords + GeoNames ID + QID), then Nominatim/OSM.
 """
 
 import logging
+import threading
 import time
 from typing import Dict, List, Optional
 
@@ -18,6 +13,11 @@ import requests
 from .models import Entity, GeoLocation
 
 logger = logging.getLogger(__name__)
+
+# Serialises geocoding across concurrently-processed folios: keeps the Nominatim
+# request rate within its ~1 req/s policy and prevents double-fetching the shared
+# cache. Geocoding is network-bound, so serializing it costs little.
+_GEO_LOCK = threading.Lock()
 
 WIKIDATA_SEARCH_URL = "https://www.wikidata.org/w/api.php"
 WIKIDATA_SPARQL_URL  = "https://query.wikidata.org/sparql"
@@ -233,16 +233,17 @@ def geocode_entities(
         e.text for e in entities if e.entity_type == "Location"
     ))
 
-    new_queries = [n for n in location_names if n not in cache]
-    if new_queries:
-        logger.info("Geocoding %d new location names…", len(new_queries))
-
-    for name in new_queries:
-        result = geocode_location(name, session=session)
-        cache[name] = result
-        if not result:
-            logger.debug("  %s -> not found", name)
-        time.sleep(delay)
+    # Serialise the network fetch across folios (Nominatim ~1 req/s + shared cache).
+    with _GEO_LOCK:
+        new_queries = [n for n in location_names if n not in cache]
+        if new_queries:
+            logger.info("Geocoding %d new location names…", len(new_queries))
+        for name in new_queries:
+            result = geocode_location(name, session=session)
+            cache[name] = result
+            if not result:
+                logger.debug("  %s -> not found", name)
+            time.sleep(delay)
 
     locations: List[GeoLocation] = []
     seen: set = set()

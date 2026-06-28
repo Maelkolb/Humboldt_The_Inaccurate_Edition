@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI: Entity linking + consistency check (Step 3.5) as a post-process.
+CLI: Entity linking + consistency check (offline post-process).
 
 Resolves the Person / Location / Species entities in an existing
 ``digital_edition_complete.json`` against the *edition humboldt digital*
@@ -23,7 +23,6 @@ Usage:
 """
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
@@ -32,14 +31,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.entity_register import EntityRegister
 from src.entity_linking import link_and_check_json
 from src import config
+from src.logging_setup import configure_logging
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    configure_logging()
     p = argparse.ArgumentParser(description="Link entities to the eHD register.")
     p.add_argument("--json", required=True,
                    help="Path to digital_edition_complete.json")

@@ -7,7 +7,6 @@ Usage:
 """
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 
@@ -15,26 +14,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.downloader import IIIFDownloader
 from src import config
+from src.logging_setup import configure_logging
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    configure_logging()
 
     parser = argparse.ArgumentParser(description="Download IIIF images.")
+    parser.add_argument("--manifest", default=None, help="Full IIIF manifest URL")
     parser.add_argument(
-        "--manifest", default=config.IIIF_MANIFEST_URL or None,
-        help="Full IIIF manifest URL",
-    )
-    parser.add_argument(
-        "--start", type=int, default=config.DOWNLOAD_START_SEQ,
+        "--start", type=int, default=1,
         help="First sequence number to download (1-based, inclusive)",
     )
     parser.add_argument(
-        "--end", type=int, default=config.DOWNLOAD_END_SEQ,
+        "--end", type=int, default=None,
         help="Last sequence number to download (1-based, inclusive)",
     )
     parser.add_argument(
@@ -42,13 +35,13 @@ def main() -> None:
         help="Output directory for downloaded images",
     )
     parser.add_argument(
-        "--delay", type=float, default=config.DOWNLOAD_DELAY_SECONDS,
+        "--delay", type=float, default=0.5,
         help="Delay in seconds between requests",
     )
     args = parser.parse_args()
 
     if not args.manifest:
-        print("Error: --manifest URL is required (or set IIIF_MANIFEST_URL in config).")
+        print("Error: --manifest URL is required.")
         sys.exit(1)
 
     downloader = IIIFDownloader(

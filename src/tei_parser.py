@@ -1,16 +1,6 @@
-"""
-TEI XML Parser – Humboldt Journal Edition
-==========================================
-Parses TEI XML files from edition-humboldt.de directly into PageResult objects,
-enabling HTML edition generation WITHOUT requiring Gemini API transcription.
-
-When you already have the scholarly TEI XML (e.g. from
-https://edition-humboldt.de/v11/H1242132), this produces higher-quality output
-than image-based transcription because:
-- The text is the published scholarly transcription
-- All editorial apparatus (del, add, unclear, etc.) is preserved
-- Named entities are TEI-tagged (persName, placeName, orgName)
-- Marginal notes carry precise place attributes (left, right, mTop, mBottom)
+"""Parse edition-humboldt.de TEI XML directly into ``PageResult`` objects (no
+Gemini needed), preserving the scholarly text, editorial apparatus, TEI-tagged
+entities, and marginal-note positions.
 
 Usage:
     from src.tei_parser import parse_tei_file
@@ -433,7 +423,7 @@ class _PageCollector:
             return
 
         if local == "metamark":
-            # Skip metamark entirely (used to collect Erledigt-Striche; feature removed)
+            # Skip metamark entirely (keep only its tail text)
             if elem.tail:
                 self._push(elem.tail)
             return
@@ -657,7 +647,6 @@ def _build_page_regions(page_data: Dict[str, Any], page_idx: int) -> List[Region
             languages=langs,
             position=f"{place} margin" if not is_sticked else "pasted",
             marginal_position=mp,
-            is_pasted_slip=is_sticked,
             editorial_note=editorial_note,
             tei_id=xml_id,
         ))

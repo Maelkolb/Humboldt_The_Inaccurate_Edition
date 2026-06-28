@@ -1,17 +1,8 @@
-"""
-Ground-Truth Matching – Humboldt Journal Edition (optional, behind --ground-truth-tei)
-=======================================================================================
-For each detected region on a page, query Gemini to find the corresponding
-text segment in an externally-provided **ground-truth TEI** (typically the
-scholarly transcription from https://edition-humboldt.de/).
+"""Ground-truth matching (optional, ``--ground-truth-tei``).
 
-The result is stored on each :class:`~src.models.Region` in two new fields:
-
-  * ``ground_truth_content``    — the matched GT text
-  * ``ground_truth_confidence`` — 0..1 confidence the model assigned
-
-The HTML viewer can then offer a three-way toggle in the transcription panel:
-**Gemini** / **Ground Truth** / **Diff**.
+For each detected region, the model selects the matching span of an external
+ground-truth TEI (edition-humboldt.de), stored as ``Region.ground_truth_content``
++ ``ground_truth_confidence`` and surfaced as the viewer's Gemini/GT/Diff toggle.
 
 Workflow per page
 -----------------
@@ -28,7 +19,6 @@ populated).
 
 from __future__ import annotations
 
-import base64
 import difflib
 import json
 import logging
@@ -37,10 +27,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from google import genai
-from google.genai import types
 
-from .json_utils import parse_json_robust
-from .models import PageResult, Region
+from .imaging import page_image_bytes
+from .llm import generate_json
+from .models import PageResult, Region, is_opposite_marginal
 from .tei_parser import parse_tei_file, parse_tei_string
 
 logger = logging.getLogger(__name__)
@@ -179,7 +169,7 @@ def _gt_page_text_for_prompt(gt_page: PageResult) -> str:
     for r in gt_page.regions:
         if r.region_type in ("marginal_note", "pasted_slip"):
             place = r.marginal_position or r.position or "inline"
-            tag = "pasted_slip" if r.is_pasted_slip else "marginal_note"
+            tag = r.region_type
             if not r.content:
                 continue
             parts.append(f"[{tag} place={place}] {r.content}")
@@ -347,13 +337,8 @@ def _reflow_to_reference(gt_text: str, ref_text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Deterministic body fallback
+# Token helpers (shared by the deterministic aligner)
 # ---------------------------------------------------------------------------
-# The LLM matcher occasionally returns nothing for the main body on pages
-# where the pipeline's transcription is badly garbled — it can't confidently
-# align Gemini→GT. But the ground truth IS in the TEI, so rather than lose it
-# we cut the GT main-text deterministically and assign it to the detected
-# main_text regions by token alignment. No model call, always available.
 
 _NONWS_RE = re.compile(r"\S+")
 # Strip inline markup / editorial markers / surrounding punctuation so tokens
@@ -368,78 +353,6 @@ def _norm_tok(word: str) -> str:
     return _TOK_STRIP_RE.sub("", word).casefold()
 
 
-def _split_gt_main_text(
-    gemini_segments: List[str], gt_text: str
-) -> List[str]:
-    """Distribute *gt_text* across the detected text regions by matching each
-    region to the GT span its *own content* aligns with — not by position.
-
-    Each region is given the verbatim GT between its anchor and the next
-    region's anchor (so contiguous GT isn't dropped), but only if its content
-    genuinely overlaps that span. A region whose text does not confidently
-    match any GT — an overlapping or misclassified region, or text belonging to
-    another folio — is left empty rather than handed unrelated GT. Wrong ground
-    truth is worse than none.
-    """
-    gt_toks = [(m.group(), m.start(), m.end())
-               for m in _NONWS_RE.finditer(gt_text)]
-    n = len(gemini_segments)
-    W = len(gt_toks)
-    if W == 0:
-        return ["" for _ in range(n)]
-    if n <= 1:
-        return [gt_text.strip()]
-
-    gt_words = [_norm_tok(t[0]) for t in gt_toks]
-    flat, seg_of, seg_len = [], [], [0] * n
-    for si, seg in enumerate(gemini_segments):
-        for w in (seg or "").split():
-            nw = _norm_tok(w)
-            if nw:
-                flat.append(nw)
-                seg_of.append(si)
-                seg_len[si] += 1
-
-    matched: List[List[int]] = [[] for _ in range(n)]
-    for a, b, size in difflib.SequenceMatcher(
-        a=flat, b=gt_words, autojunk=False
-    ).get_matching_blocks():
-        for k in range(size):
-            matched[seg_of[a + k]].append(b + k)
-
-    # Accept a region only when enough of its own words land in the GT — this
-    # is what stops an overlapping region from grabbing unrelated GT.
-    cand = []  # [gt_start, region_index, strength]
-    for si in range(n):
-        m = matched[si]
-        if not m:
-            continue
-        strength = len(m)
-        ratio = strength / max(seg_len[si], 1)
-        if ratio < 0.34 and strength < 4:
-            continue
-        cand.append([min(m), si, strength])
-    if not cand:
-        return ["" for _ in range(n)]
-
-    # Order by GT position; keep strictly-increasing anchors (drop a weaker
-    # region that would start at/behind an already-placed one).
-    cand.sort(key=lambda c: (c[0], -c[2]))
-    tiled = []
-    for c in cand:
-        if tiled and c[0] <= tiled[-1][0]:
-            continue
-        tiled.append(c)
-
-    slices = ["" for _ in range(n)]
-    for idx, (start, si, _strength) in enumerate(tiled):
-        end = tiled[idx + 1][0] if idx + 1 < len(tiled) else W
-        if start >= W or end <= start:
-            continue
-        slices[si] = gt_text[gt_toks[start][1]:gt_toks[end - 1][2]].strip()
-    return slices
-
-
 # Text-bearing region types whose ground truth lives in the TEI as prose and
 # can be aligned by content. (Sketches, tables, calculations and instrument
 # lists are structural, not free prose, so they're handled by the matcher only.)
@@ -452,51 +365,33 @@ _GT_TEXT_TYPES = (
 def _fill_unmatched_gt(
     regions: List[Region], gt_page: PageResult
 ) -> List[Region]:
-    """Deterministic fill: assign ground truth to every detected text region
-    the matcher left empty by aligning the *full* manuscript ground truth for
-    the folio (body + manuscript marginal notes + headings + …, in document
-    order) across the detected text regions and cutting verbatim slices.
-
-    Because the source is the whole manuscript GT pool — not just the body —
-    a region Gemini misclassified by type (e.g. a marginal note detected as
-    main_text) still receives the correct GT content. Regions the matcher
-    already populated are never overruled.
+    """Deterministic safety net: fill ground truth for any text region the LLM
+    matcher left empty, using :func:`align_ground_truth_to_page`. Regions the
+    matcher already populated are never overruled, so this can only add coverage.
     """
     import dataclasses
 
-    det = [(i, r) for i, r in enumerate(regions)
-           if r.region_type in _GT_TEXT_TYPES]
-    if not det:
-        return regions
-    missing = {i for i, r in det if not r.ground_truth_content}
+    missing = [
+        i for i, r in enumerate(regions)
+        if r.region_type in _GT_TEXT_TYPES and not (r.ground_truth_content or "").strip()
+    ]
     if not missing:
         return regions
 
-    gt_text = "\n".join(
-        r.content for r in gt_page.regions
-        if r.region_type in _GT_TEXT_TYPES and r.content
-    ).strip()
-    if not gt_text:
-        return regions
-
-    segments = [r.content or "" for _, r in det]
-    slices = _split_gt_main_text(segments, gt_text)
-
+    aligned = align_ground_truth_to_page(
+        [dataclasses.replace(r, ground_truth_content=None) for r in regions], gt_page
+    )
     out = list(regions)
     assigned = 0
-    for (i, r), sl in zip(det, slices):
-        if i not in missing or not sl:
-            continue
-        out[i] = dataclasses.replace(
-            out[i],
-            ground_truth_content=_reflow_to_reference(sl, r.content or ""),
-            ground_truth_confidence=0.5,   # deterministic, not model-scored
-        )
-        assigned += 1
+    for i in missing:
+        gt = aligned[i].ground_truth_content
+        if gt:
+            out[i] = dataclasses.replace(
+                out[i], ground_truth_content=gt, ground_truth_confidence=0.5,
+            )
+            assigned += 1
     if assigned:
-        logger.info(
-            "  GT filled deterministically from TEI (%d region(s)).", assigned,
-        )
+        logger.info("  GT filled deterministically from TEI (%d region(s)).", assigned)
     return out
 
 
@@ -527,6 +422,203 @@ def _attach_gt_entities(
             out.append(dataclasses.replace(r, ground_truth_entities=matched))
         else:
             out.append(r)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Deterministic alignment (primary matcher)
+# ---------------------------------------------------------------------------
+# Ground-truth matching is fundamentally an alignment problem: give each detected
+# region the contiguous span of the page's GT that corresponds to it. We solve it
+# deterministically (no model call, reproducible) by aligning two ordered token
+# streams separately — the reading-order MAIN text and the MARGINALIA. Keeping the
+# streams apart is what stops a marginal note from being aligned into a
+# main-text/ref region — the boundary mis-assignment that inflated CER on pages
+# like 5r.
+
+# Reading-order prose types that flow as one stream down the page.
+_MAIN_GT_TYPES = frozenset({
+    "page_number", "entry_heading", "main_text", "bibliographic_ref",
+    "coordinates", "calculation", "instrument_list", "catch_phrase", "crossed_out",
+})
+# Positioned annotations, matched structurally rather than within the main stream.
+_MARGIN_GT_TYPES = frozenset({"marginal_note", "pasted_slip"})
+
+
+def _match_margins(hyp: List[Region], gt: List[Region]) -> Dict[int, int]:
+    """Greedily match hyp marginal regions to GT marginal blocks by content
+    overlap, with a small same-position bonus. Returns ``{hyp_idx: gt_idx}``."""
+    if not hyp or not gt:
+        return {}
+    scored: List[Tuple[float, int, int]] = []
+    for hi, h in enumerate(hyp):
+        ht = [t for t in (_norm_tok(w) for w in (h.content or "").split()) if t]
+        for gi, g in enumerate(gt):
+            gtt = [t for t in (_norm_tok(w) for w in (g.content or "").split()) if t]
+            ratio = (difflib.SequenceMatcher(a=ht, b=gtt, autojunk=False).ratio()
+                     if ht and gtt else 0.0)
+            if h.marginal_position and h.marginal_position == g.marginal_position:
+                ratio += 0.15
+            scored.append((ratio, hi, gi))
+    scored.sort(reverse=True)
+    used_h: set = set()
+    used_g: set = set()
+    res: Dict[int, int] = {}
+    for ratio, hi, gi in scored:
+        if hi in used_h or gi in used_g or ratio < 0.30:
+            continue
+        used_h.add(hi)
+        used_g.add(gi)
+        res[hi] = gi
+
+    # Positional fallback: a real marginal whose transcription failed (e.g. "?")
+    # has no content overlap, so it is still unmatched here. Pair any leftover hyp
+    # and GT marginals that share a marginal_position (1-to-1) so its GT is not
+    # lost. Only fills otherwise-empty regions, so it cannot mis-assign a matched one.
+    free_h = [hi for hi in range(len(hyp)) if hi not in used_h]
+    free_g = [gi for gi in range(len(gt)) if gi not in used_g]
+    for hi in free_h:
+        pos = hyp[hi].marginal_position
+        if not pos:
+            continue
+        for gi in free_g:
+            if gi not in used_g and gt[gi].marginal_position == pos:
+                used_g.add(gi)
+                res[hi] = gi
+                break
+    return res
+
+
+def _align_main_stream(segments: List[str], gt_text: str) -> List[str]:
+    """Partition *gt_text* across the ordered main-stream *segments* by global
+    token alignment, returning one verbatim GT slice per segment.
+
+    The full alignment is walked to label EVERY GT token with the segment it
+    aligns to — carrying the label forward across gaps so no GT is dropped — then
+    the GT is tiled into contiguous per-segment spans at the segments'
+    first-occurrence boundaries. Every segment that appears in the alignment gets
+    a contiguous slice; wrong assignments are left for the metric's bogus-match
+    guard to drop rather than discarded here.
+    """
+    gt_toks = [(m.group(), m.start(), m.end()) for m in _NONWS_RE.finditer(gt_text)]
+    W = len(gt_toks)
+    n = len(segments)
+    if W == 0:
+        return ["" for _ in range(n)]
+    if n == 1:
+        return [gt_text.strip()]
+
+    gt_norm = [_norm_tok(t[0]) for t in gt_toks]
+    flat: List[str] = []
+    seg_of: List[int] = []
+    for si, seg in enumerate(segments):
+        for w in (seg or "").split():
+            nw = _norm_tok(w)
+            if nw:
+                flat.append(nw)
+                seg_of.append(si)
+    if not flat:
+        return ["" for _ in range(n)]
+
+    # Label each GT token with the segment of its aligned hyp token.
+    label: List[Optional[int]] = [None] * W
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(
+        a=flat, b=gt_norm, autojunk=False
+    ).get_opcodes():
+        if tag in ("equal", "replace") and i2 > i1:
+            span = i2 - i1
+            for off in range(j2 - j1):
+                hi = min(i1 + min(off, span - 1), i2 - 1)
+                label[j1 + off] = seg_of[hi]
+        # 'delete' (hyp-only) and 'insert' (gt-only) leave labels None.
+
+    # Carry labels forward, then back-fill any leading gap.
+    last: Optional[int] = None
+    for j in range(W):
+        if label[j] is None:
+            label[j] = last
+        else:
+            last = label[j]
+    nxt: Optional[int] = None
+    for j in range(W - 1, -1, -1):
+        if label[j] is None:
+            label[j] = nxt
+        else:
+            nxt = label[j]
+
+    # Tile GT into contiguous spans at each segment's first-occurrence boundary
+    # (kept strictly increasing so spans never overlap and all GT is covered).
+    first: Dict[int, int] = {}
+    for j, si in enumerate(label):
+        if si is not None and si not in first:
+            first[si] = j
+    order = sorted(first.items(), key=lambda kv: kv[1])
+    slices = ["" for _ in range(n)]
+    for idx, (si, start) in enumerate(order):
+        end = order[idx + 1][1] if idx + 1 < len(order) else W
+        if end > start:
+            slices[si] = gt_text[gt_toks[start][1]:gt_toks[end - 1][2]].strip()
+    return slices
+
+
+def align_ground_truth_to_page(
+    regions: List[Region], gt_page: PageResult
+) -> List[Region]:
+    """Deterministically assign each region its verbatim GT span — no model call.
+
+    The page's GT is split into a reading-order MAIN stream and MARGINALIA. The
+    main stream is token-aligned to the detected main regions' transcriptions and
+    cut into per-region verbatim slices; marginal regions are matched structurally
+    to GT marginal blocks. Each slice is re-lineated to the region's own line
+    breaks. Regions with no confident match are left empty (wrong GT is worse than
+    none).
+    """
+    import dataclasses
+    out = list(regions)
+
+    # MAIN reading-order stream.
+    gt_main = "\n".join(
+        r.content for r in gt_page.regions
+        if r.region_type in _MAIN_GT_TYPES and (r.content or "").strip()
+    ).strip()
+    main_idx = [
+        i for i, r in enumerate(regions)
+        if r.region_type in _MAIN_GT_TYPES
+        and not getattr(r, "is_visual", False)
+        and not is_opposite_marginal(r.marginal_position)
+    ]
+    if gt_main and main_idx:
+        slices = _align_main_stream(
+            [regions[i].content or "" for i in main_idx], gt_main
+        )
+        for k, i in enumerate(main_idx):
+            if slices[k]:
+                out[i] = dataclasses.replace(
+                    out[i],
+                    ground_truth_content=_reflow_to_reference(slices[k], regions[i].content or ""),
+                    ground_truth_confidence=0.6,
+                )
+
+    # MARGINALIA (structural match).
+    gt_margins = [
+        r for r in gt_page.regions
+        if r.region_type in _MARGIN_GT_TYPES and (r.content or "").strip()
+    ]
+    margin_idx = [
+        i for i, r in enumerate(regions)
+        if r.region_type in _MARGIN_GT_TYPES and not is_opposite_marginal(r.marginal_position)
+    ]
+    for local_k, gi in _match_margins([regions[i] for i in margin_idx], gt_margins).items():
+        i = margin_idx[local_k]
+        gt_r = gt_margins[gi]
+        out[i] = dataclasses.replace(
+            out[i],
+            ground_truth_content=_reflow_to_reference((gt_r.content or "").strip(), regions[i].content or ""),
+            ground_truth_confidence=0.6,
+        )
+
+    n = sum(1 for r in out if r.ground_truth_content)
+    logger.info("  GT aligned deterministically: %d / %d regions populated.", n, len(out))
     return out
 
 
@@ -634,16 +726,6 @@ GROUND-TRUTH TEXT FOR THIS PAGE:
 
 
 # ---------------------------------------------------------------------------
-# Image helper
-# ---------------------------------------------------------------------------
-
-def _load_image_bytes(image_path: str | Path) -> Tuple[bytes, str]:
-    from .region_detection import load_image_as_base64
-    data, mime = load_image_as_base64(image_path)
-    return base64.b64decode(data), mime
-
-
-# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -665,18 +747,22 @@ def match_ground_truth_to_page(
     if not regions:
         return regions
 
-    # Serialise regions for the prompt (only the fields the model needs)
+    # Serialise regions for the prompt (only the fields the model needs).
+    # Regions with no transcription (never read, or emptied by the layout pass as
+    # a duplicate/contamination) are NOT sent: a region with no text cannot own a
+    # GT span, and including it lets the matcher split a single GT block onto it
+    # (e.g. a marginal note split across the real region and an emptied neighbour).
     serialised = [
         {
             "region_index": r.region_index,
             "region_type": r.region_type,
             "bbox": r.bbox,
             "marginal_position": r.marginal_position,
-            "is_pasted_slip": r.is_pasted_slip,
             "is_visual": r.is_visual,
             "gemini_content": r.content,
         }
         for r in regions
+        if (r.content or "").strip()
     ]
     regions_json = json.dumps(serialised, ensure_ascii=False, indent=2)
     gt_text = _gt_page_text_for_prompt(gt_page)
@@ -684,36 +770,17 @@ def match_ground_truth_to_page(
 
     prompt = _PROMPT.format(regions_json=regions_json, gt_text=gt_text)
 
-    image_bytes, mime_type = _load_image_bytes(image_path)
+    image_bytes, mime_type = page_image_bytes(image_path)
 
-    data: List[Any] = []
-    for attempt in range(1, 3):
-        try:
-            response = client.models.generate_content(
-                model=model_id,
-                contents=[
-                    types.Content(parts=[
-                        types.Part(text=prompt),
-                        types.Part(inline_data=types.Blob(
-                            mime_type=mime_type, data=image_bytes,
-                        )),
-                    ])
-                ],
-                config=types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level=thinking_level
-                    ),
-                    response_mime_type="application/json",
-                ),
-            )
-            data = _coerce_match_list(parse_json_robust(response.text))
-            if data:
-                break
-        except Exception as exc:
-            logger.error(
-                "Ground-truth matching error (attempt %d/2): %s",
-                attempt, exc,
-            )
+    raw = generate_json(
+        client, model_id, prompt,
+        thinking_level=thinking_level,
+        images=[(image_bytes, mime_type)],
+        default=[],
+        max_attempts=2,
+        stage="ground_truth",
+    )
+    data = _coerce_match_list(raw)
 
     if not data:
         logger.warning(
@@ -781,6 +848,13 @@ def match_ground_truth_to_page(
     # Deterministic safety net for the main body (handles pages where the
     # matcher couldn't align a badly-garbled transcription to the GT).
     out = _fill_unmatched_gt(out, gt_page)
+    # Guard: a region with no transcription never owns ground truth (covers any
+    # GT a prior run or the matcher may have left on an emptied region).
+    out = [
+        dataclasses.replace(r, ground_truth_content=None, ground_truth_confidence=None)
+        if (r.ground_truth_content and not (r.content or "").strip()) else r
+        for r in out
+    ]
     # Layer the eHD gold-standard entity annotations onto the matched GT text.
     out = _attach_gt_entities(out, gt_page)
     return out

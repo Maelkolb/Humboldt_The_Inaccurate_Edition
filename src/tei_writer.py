@@ -1,19 +1,11 @@
-"""
-TEI XML Writer – Humboldt Journal Digital Edition
-==================================================
-Serialises :class:`~src.models.PageResult` objects to TEI XML following the
-same conventions used by **edition humboldt digital**
-(https://edition-humboldt.de/) and by ``tei_parser.py`` in this codebase.
+"""Serialise :class:`~src.models.PageResult` objects to TEI XML (edition humboldt
+digital conventions; round-trips with ``tei_parser.py``).
 
-Two output modes
-----------------
-1. ``results_to_tei_document(results, ...)`` — a full TEI document for the
-   whole book. Includes a ``<teiHeader>`` and one ``<pb/>`` per page in
-   ``<text><body>``. This is what gets written to
-   ``output/digital_edition.tei.xml``.
-
-2. ``page_result_to_tei_document(page_result, ...)`` — a full, self-contained
-   TEI document for a single page (one ``<pb/>``, surrounded by a minimal but
+Two output modes:
+1. ``results_to_tei_document(results, ...)`` — full book (``<teiHeader>`` + one
+   ``<pb/>`` per page); written to ``output/digital_edition.tei.xml``.
+2. ``page_result_to_tei_document(page_result, ...)`` — a self-contained single-page
+   document (one ``<pb/>``, surrounded by a minimal but
    valid ``<teiHeader>``). This is what the HTML "Download TEI" button
    per-page produces.
 
@@ -60,7 +52,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .models import Entity, PageResult, Region
+from .models import Entity, PageResult, Region, is_opposite_marginal
 
 logger = logging.getLogger(__name__)
 
@@ -290,9 +282,7 @@ def _make_region_element(
     text  = region.content or ""
 
     # opposite-folio bleedthrough: not transcribed, do NOT emit
-    if (rtype == "marginal_note"
-            and (region.marginal_position or "") == "opposite"
-            and not text.strip()):
+    if is_opposite_marginal(region.marginal_position) and not text.strip():
         return None
 
     if rtype == "page_number":
@@ -315,8 +305,6 @@ def _make_region_element(
         mp = _PLACE_MAP.get(region.marginal_position or "", None)
         if mp:
             attrs["place"] = mp
-        if region.is_pasted_slip:
-            attrs["rend"] = "sticked"
         note = ET.Element(f"{{{TEI_NS}}}note", **attrs)
         # Marginal notes are wrapped in <p> internally in the GT TEI
         p = ET.SubElement(note, f"{{{TEI_NS}}}p")

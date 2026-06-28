@@ -1,10 +1,5 @@
-"""
-Authority Register (edition humboldt digital) – Humboldt Journal Edition
-========================================================================
-Loads the curated person / place / plant registers published by the
-*edition humboldt digital* (eHD, BBAW, CC BY-SA 4.0) into fast in-memory
-lookup indices, so the pipeline can resolve the entities its NER stage emits
-to stable authority records:
+"""Load the edition humboldt digital authority registers (person/place/plant)
+into in-memory lookup indices for resolving NER entities to stable records:
 
   * Person  -> eHD person id + VIAF URI
   * Location -> eHD place id  + GeoNames URI (+ historical alt names)

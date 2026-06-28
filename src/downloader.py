@@ -1,15 +1,7 @@
-"""
-IIIF Image Downloader
-=====================
-Downloads page images from an IIIF Presentation API v2 manifest.
+"""Download page images from a IIIF Presentation API v2 manifest.
 
-Usage (CLI):
-    python -m scripts.download_images
-
-Usage (library):
-    from src.downloader import IIIFDownloader
-    downloader = IIIFDownloader(book_id="bsb11005578", output_dir="images")
-    downloader.download(start_seq=15, end_seq=102)
+Library use:
+    IIIFDownloader(book_id="bsb11005578", output_dir="images").download(15, 102)
 """
 
 import os

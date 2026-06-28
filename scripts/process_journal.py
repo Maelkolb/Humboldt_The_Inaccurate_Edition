@@ -1,32 +1,18 @@
 #!/usr/bin/env python3
-"""
-CLI: Run the Humboldt Journal digitization pipeline.
+"""CLI: run the Humboldt journal digitization pipeline.
 
-Pipeline steps:
-  1.   Region Detection (Gemini) – Humboldt-specific region types
-  2.   Transcription – Kurrentschrift + multilingual scholarly transcription
-  2.5  Consistency Check (multimodal) – fixes duplicates / contamination /
-       language mismatches and attempts to resolve [?] uncertain readings
-       directly from the page image. Both the pre- and post-check Gemini
-       transcriptions are persisted per region.
-  3.   Entity Annotation (NER) – scientific/geographic entities
-  4.   Georeferencing (Nominatim) – with historical name mapping
-  4.5  Geolocation Validation (text-based) – drops geocoding results that
-       are implausible for the page context / Humboldt's itinerary
-  5.   Ground-Truth Matching (optional, --ground-truth-tei) – attaches
-       scholarly transcription text to each detected region
-  6.   HTML Digital Edition – scholarly side-by-side facsimile + transcription
-  7.   TEI XML Export – always written as digital_edition.tei.xml
+Per page: region detection → ensemble reading (region crop + two whole-page reads,
+alignment-locked merge) → layout pass → NER → geocoding → geo-validation →
+optional ground-truth matching. Then writes the HTML edition bundle and TEI XML.
 
 Usage:
     python scripts/process_journal.py --images images/ --out output/
-    python scripts/process_journal.py --images images/ --out output/ --embed-images --end 5
+    python scripts/process_journal.py --images images/ --out output/ --end 5
 
-Requires GEMINI_API_KEY in environment or .env file.
+Requires GEMINI_API_KEY in the environment or a .env file.
 """
 
 import argparse
-import logging
 import os
 import sys
 from pathlib import Path
@@ -41,14 +27,11 @@ except ImportError:
 
 from google import genai
 from src import config, process_book, generate_html_edition
+from src.logging_setup import configure_logging
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    configure_logging()
 
     parser = argparse.ArgumentParser(
         description="Humboldt Journal Digital Edition – run the full pipeline."
@@ -79,11 +62,12 @@ def main() -> None:
     )
     parser.add_argument(
         "--model-transcription", default=config.MODEL_ID_TRANSCRIPTION,
-        help="Override model for transcription (default: same as --model)",
+        help="Override model for the region/whole-page reads (default: same as --model)",
     )
     parser.add_argument(
-        "--model-consistency", default=config.MODEL_ID_CONSISTENCY,
-        help="Override model for consistency check (default: same as --model)",
+        "--model-merge", default=config.MODEL_ID_MERGE,
+        help=f"Override model for the merge resolver + layout pass "
+             f"(default: {config.MODEL_ID_MERGE_DEFAULT})",
     )
     parser.add_argument(
         "--model-ner", default=config.MODEL_ID_NER,
@@ -110,12 +94,12 @@ def main() -> None:
     parser.add_argument(
         "--thinking-transcription", default=config.THINKING_LEVEL_TRANSCRIPTION,
         choices=["none", "low", "medium", "high"],
-        help="Thinking level for transcription (default: low)",
+        help="Thinking level for the reads (default: low)",
     )
     parser.add_argument(
-        "--thinking-consistency", default=None,
+        "--thinking-merge", default=None,
         choices=["none", "low", "medium", "high"],
-        help="Thinking level for consistency check (default: low)",
+        help="Thinking level for the merge resolver + layout pass (default: medium)",
     )
     parser.add_argument(
         "--thinking-ner", default=None,
@@ -133,12 +117,22 @@ def main() -> None:
         help="Thinking level for ground-truth matching (default: medium)",
     )
     parser.add_argument(
+        "--transcription-workers", type=int, default=6,
+        help="Concurrent workers for the per-region reading (default: 6)",
+    )
+    parser.add_argument(
+        "--ensemble-k", type=int, default=config.ENSEMBLE_K_CROP,
+        help=f"Number of per-region CROP reads (M1) per region "
+             f"(default: {config.ENSEMBLE_K_CROP}); the whole-page (M2) and "
+             f"whole-page-structured (M3) candidates are always added.",
+    )
+    parser.add_argument(
         "--no-consistency", action="store_true",
-        help="Skip Step 2.5 (the multimodal consistency check).",
+        help="Skip Step 4 (the whole-page layout pass: dedup / contamination / bleed).",
     )
     parser.add_argument(
         "--no-geo-validation", action="store_true",
-        help="Skip Step 4.5 (the text-based geolocation validation).",
+        help="Skip the text-based geolocation validation.",
     )
     parser.add_argument(
         "--ground-truth-tei", default=None, metavar="PATH",
@@ -151,11 +145,13 @@ def main() -> None:
     )
     parser.add_argument(
         "--embed-images", action="store_true",
-        help="Embed facsimile images as base64 in the HTML",
+        help="Embed facsimiles as base64 in index.html instead of copying "
+             "them into the bundle's facsimiles/ folder",
     )
     parser.add_argument(
         "--image-ref-prefix", default=None,
-        help="Reference images via this path prefix instead of embedding",
+        help="Reference facsimiles via this URL/path prefix instead of "
+             "bundling them (for externally hosted images)",
     )
     parser.add_argument(
         "--title", default="Alexander von Humboldt — Journals",
@@ -173,12 +169,14 @@ def main() -> None:
         sys.exit(1)
 
     client = genai.Client(api_key=api_key)
+    read_model = args.model_transcription or args.model
+    merge_model = args.model_merge or config.MODEL_ID_MERGE_DEFAULT
     print(f"Gemini client ready – default model: {args.model}")
-    print(f"  Per-stage models: layout={args.model_layout or args.model}, "
-          f"transcription={args.model_transcription or args.model}, "
-          f"consistency={args.model_consistency or args.model}, "
-          f"ner={args.model_ner or args.model}")
-    print(f"  Thinking: layout={args.thinking_layout}, transcription={args.thinking_transcription}")
+    print(f"  Ensemble reads: crop x{args.ensemble_k} (M1) + whole-page (M2) + "
+          f"structured (M3) on {read_model}; alignment-locked merge + layout on {merge_model}")
+    print(f"  detect={args.model_layout or args.model}, ner={args.model_ner or args.model}")
+    print(f"  Layout pass: {'OFF' if args.no_consistency else 'ON'} | "
+          f"region workers: {args.transcription_workers}")
 
     results = process_book(
         client=client,
@@ -190,16 +188,18 @@ def main() -> None:
         thinking_level_layout=args.thinking_layout,
         thinking_level_transcription=args.thinking_transcription,
         run_consistency_check=not args.no_consistency,
+        ensemble_k=args.ensemble_k,
         start_page=args.start,
         end_page=args.end,
         run_geo_validation=not args.no_geo_validation,
+        transcription_workers=args.transcription_workers,
         model_id_layout=args.model_layout,
         model_id_transcription=args.model_transcription,
-        model_id_consistency=args.model_consistency,
+        model_id_merge=args.model_merge,
         model_id_ner=args.model_ner,
         model_id_ground_truth=args.model_ground_truth,
         model_id_geo_validation=args.model_geo_validation,
-        thinking_level_consistency=args.thinking_consistency,
+        thinking_level_merge=args.thinking_merge,
         thinking_level_ner=args.thinking_ner,
         thinking_level_ground_truth=args.thinking_ground_truth,
         thinking_level_geo_validation=args.thinking_geo_validation,
@@ -208,7 +208,7 @@ def main() -> None:
     )
 
     if results:
-        html_path = generate_html_edition(
+        edition_zip = generate_html_edition(
             results=results,
             output_path=Path(args.out) / "humboldt_edition.html",
             title=args.title,
@@ -217,10 +217,12 @@ def main() -> None:
             entity_labels=config.ENTITY_LABELS,
             region_colors=config.REGION_COLORS,
             region_labels=config.REGION_LABELS,
-            image_folder=args.images if args.embed_images else None,
+            image_folder=args.images,
             image_ref_prefix=args.image_ref_prefix,
+            embed_images=args.embed_images,
         )
-        print(f"\nDigital edition: {html_path}")
+        print(f"\nDigital edition bundle: {edition_zip.with_suffix('')}/")
+        print(f"Digital edition archive: {edition_zip}")
 
     total_ents = sum(len(r.entities) for r in results)
     total_locs = sum(len(r.locations) for r in results)

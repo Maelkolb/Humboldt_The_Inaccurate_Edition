@@ -20,11 +20,15 @@ class RegionType(str, Enum):
     OBSERVATION_TABLE = "observation_table"
     SKETCH = "sketch"
     CROSSED_OUT = "crossed_out"
-    BIBLIOGRAPHIC_REF = "bibliographic_ref"
-    COORDINATES = "coordinates"
     INSTRUMENT_LIST = "instrument_list"
     PAGE_NUMBER = "page_number"
     CATCH_PHRASE = "catch_phrase"
+
+
+def is_opposite_marginal(marginal_position: Optional[str]) -> bool:
+    """True for opposite-folio bleedthrough (ghost text from the facing leaf),
+    which is never transcribed. Single source of truth for that test."""
+    return marginal_position == "opposite"
 
 
 @dataclass
@@ -47,8 +51,6 @@ class Region:
     marginal_position: Optional[str] = None  # "left", "right", "mTop", "mBottom", "opposite", "inline"
     # Temporal stratigraphy
     writing_layer: Optional[str] = None  # "primary", "later_addition", "unknown"
-    # Special region flags
-    is_pasted_slip: bool = False   # physical paper slip pasted onto the page
     # TEI source tracking
     tei_id: Optional[str] = None  # xml:id of the source TEI element
     # Ground-truth comparison (populated only when --ground-truth-tei is used)
@@ -64,6 +66,12 @@ class Region:
     # BEFORE the consistency QA pass touched it.
     content_pre_consistency: Optional[str] = None
     uncertain_readings_pre_consistency: Optional[List[str]] = None
+    # Candidate-reading audit fields. ``content`` holds the FINAL merged reading;
+    # ``region_reading`` is the per-region reading carried into the merge.
+    region_reading: Optional[str] = None
+    # Ensemble: all candidate reads (M1 crop + M2/M3 whole-page) for this region,
+    # merged into ``content`` by the alignment-locked consensus. Kept for audit.
+    ensemble_readings: Optional[List[str]] = None
 
     def to_dict(self) -> Dict:
         d = {
@@ -91,8 +99,6 @@ class Region:
             d["marginal_position"] = self.marginal_position
         if self.writing_layer:
             d["writing_layer"] = self.writing_layer
-        if self.is_pasted_slip:
-            d["is_pasted_slip"] = self.is_pasted_slip
         if self.tei_id:
             d["tei_id"] = self.tei_id
         if self.ground_truth_content is not None:
@@ -107,6 +113,10 @@ class Region:
             d["content_pre_consistency"] = self.content_pre_consistency
         if self.uncertain_readings_pre_consistency is not None:
             d["uncertain_readings_pre_consistency"] = self.uncertain_readings_pre_consistency
+        if self.region_reading is not None:
+            d["region_reading"] = self.region_reading
+        if self.ensemble_readings is not None:
+            d["ensemble_readings"] = self.ensemble_readings
         return d
 
     @classmethod
@@ -126,7 +136,6 @@ class Region:
             bbox=d.get("bbox"),
             marginal_position=d.get("marginal_position"),
             writing_layer=d.get("writing_layer"),
-            is_pasted_slip=d.get("is_pasted_slip", False),
             tei_id=d.get("tei_id"),
             ground_truth_content=d.get("ground_truth_content"),
             ground_truth_confidence=d.get("ground_truth_confidence"),
@@ -135,6 +144,8 @@ class Region:
             ],
             content_pre_consistency=d.get("content_pre_consistency"),
             uncertain_readings_pre_consistency=d.get("uncertain_readings_pre_consistency"),
+            region_reading=d.get("region_reading"),
+            ensemble_readings=d.get("ensemble_readings"),
         )
 
 
@@ -243,15 +254,12 @@ class PageResult:
     model_used: str
     entry_numbers: List[str] = field(default_factory=list)  # e.g. ["50", "51", "52"]
     page_languages: List[str] = field(default_factory=list)  # languages on this page
-    # Consistency check report (Step 2.5). Populated whenever the consistency
-    # check ran on this page. Each entry has the LLM's original shape:
-    #   {"issue_type": "...", "region_indices": [...],
-    #    "description": "...", "severity": "error"|"warning"}
-    # Together with each Region's ``content_pre_consistency`` snapshot, this
-    # makes the QA pass fully auditable from the JSON output.
+    # Layout-pass report: one dict per decision
+    # ({"issue_type", "region_indices", "description", "severity"}). With each
+    # region's ``content_pre_consistency`` snapshot it keeps the pass auditable.
     consistency_issues: List[Dict[str, Any]] = field(default_factory=list)
-    # Geolocation validation report (Step 4.5). One verdict dict per resolved
-    # location: {"name", "verdict": "valid"|"invalid", "confidence", "reason"}.
+    # Geolocation validation report: one verdict per resolved location
+    # ({"name", "verdict", "confidence", "reason"}).
     geo_validation: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
