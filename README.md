@@ -1,147 +1,298 @@
-# Humboldt Journal – Digital Edition Pipeline
+# Humboldt – The Inaccurate Edition
 
-A specialized LLM-powered workflow for creating a scholarly digital edition of **Alexander von Humboldt's handwritten scientific field journals**. Uses **Google Gemini 3** with prompts deeply tailored to Humboldt's difficult handwriting, complex page layouts, and multilingual content.
+An LLM-powered pipeline for producing scholarly digital editions of **Alexander von Humboldt's handwritten scientific field journals**. Runs on Google Gemini and outputs a self-contained HTML viewer alongside TEI-P5 XML, with optional comparison against the existing scholarly transcription from [edition-humboldt.de](https://edition-humboldt.de/).
 
-## Why a specialized pipeline?
+Currently supports three corpora:
 
-Humboldt's journal pages present extraordinary challenges for automated transcription:
+| Journal | File | Runner |
+|---------|------|--------|
+| *Reise. 1790. England* (H0017682) | `run_england.py` | 21 folios, GT TEI available |
+| *Amerikanische Reisetagebücher* (H0019734) | `run_america.py` | equinoctial journals |
+| *Österreich-Reise* | `run_austr.py` | European trip 1797/98 |
 
-- **Kurrentschrift** with extremely fluid, hasty strokes and personal abbreviations
-- **Complex layouts** — numbered entries, marginal notes, astronomical calculation tables, crossed-out passages, interlinear additions, pen sketches of landscapes
-- **Multilingual** — German, French, and Latin mixed freely, often within a single sentence
-- **Non-linear reading order** — marginalia relate to specific entries, insertions marked with reference signs
-- **Scientific notation** — degree/minute/second symbols, coordinate tables, instrument specifications with prices
+---
 
-This pipeline addresses all of these with custom region types, editorial conventions, and deeply specialized prompts.
+## Why a specialised pipeline?
 
-## Pipeline
+Humboldt's journals resist generic OCR and out-of-the-box LLM transcription:
 
-| Step | Module | Description |
-|------|--------|-------------|
-| 1. Region Detection | `region_detection.py` | Identifies Humboldt-specific regions: entry headings, main text, marginal notes, calculation blocks, observation tables, sketches, crossed-out passages, interlinear additions, bibliographic references, coordinates, instrument lists |
-| 2. Transcription | `transcription.py` | Each detected region is cropped from the page (with generous margins) and transcribed on its **own** focused request, in parallel. Short per-region-type prompts replace the former single whole-page call with the full rulebook, keeping the model's attention on one region at a time. Tracks languages and table structure; defers editorial/structural judgement to Step 2.5. |
-| 2.5. Consistency Check | `consistency_check.py` | **Multimodal whole-page QA pass** — now the home of the editorial rulebook. Looking at the page image alongside every region, it (a) reconciles overlapping/duplicate transcript lines that the padded per-region crops can introduce, deciding line ownership from the bounding boxes, and fixes contaminated main-text and language mismatches; (b) supplies editorial interpretation (marginal role, writing layer); and (c) attempts to resolve every word marked `[?]` directly from the ink, dropping the marker only on a confident reading. Each region keeps a snapshot (`content_pre_consistency`, `uncertain_readings_pre_consistency`) of the Step-2 output so the QA pass can be audited per region. |
-| 3. Entity Annotation | `ner.py` | NER for persons, locations, institutions, instruments, publications, celestial objects, measurements, natural objects |
-| 4. Georeferencing | `geocoding.py` | Location resolution with a historical place-name mapping (Oedenburg→Sopron, Preßburg→Bratislava, etc.) |
-| 4.5. Geolocation Validation | `geo_consistency.py` | **Text-based QA pass.** Runs after NER + geocoding and judges, from the page text alone, whether each resolved coordinate plausibly is the place Humboldt named. Implausible hits (non-places, wrong-continent homonyms, misread fragments that latched onto an unrelated famous place) are dropped; per-location verdicts are stored in `geo_validation` for auditing. Conservative and fails open. |
-| 5. Ground-Truth Matching | `ground_truth.py` | **Optional**, enabled by `--ground-truth-tei PATH`. For each page whose folio appears in an externally-provided ground-truth TEI (e.g. from [edition-humboldt.de](https://edition-humboldt.de/)), every region's matching GT text is attached to the region. The HTML viewer then exposes a **Gemini / Ground Truth / Diff** toggle for that page. |
-| 6. HTML Edition | `html_generator.py` | Self-contained digital edition with side-by-side facsimile + transcription, editorial apparatus, entity highlighting, map view, per-page TEI download |
-| 7. TEI Export | `tei_writer.py` | Always emits `digital_edition.tei.xml` in the output folder, following the same structural conventions as edition-humboldt digital (`<pb>`, `<head>`, `<note place="…">`, `<del rendition="#s">`, `<hi rendition="#u">`, `<unclear>`, `<gap/>`, `<supplied>`, `<fw type="folNum"/"catch">`, …). |
+- **Kurrentschrift** — fluid, hasty strokes with personal abbreviations and ligatures
+- **Complex layouts** — numbered entries, marginal annotations, astronomical calculation tables, crossed-out passages, interlinear insertions, pen sketches
+- **Multilingual** — German, French and Latin mixed freely, often mid-sentence
+- **Non-linear reading order** — marginalia keyed to specific passages by reference signs
+- **Scientific notation** — coordinate tables, instrument lists with prices, barometric readings
 
-## Humboldt-Specific Region Types
+The pipeline addresses each of these with a custom region taxonomy, editorial conventions, and deeply tailored prompts.
 
-| Region Type | Description | Visual Style |
-|---|---|---|
-| `entry_heading` | Numbered entry header (N. 50-52) | Blue heading with divider |
-| `main_text` | Primary journal prose | Standard text |
-| `marginal_note` | Notes in margins | Purple background, italic |
-| `calculation` | Mathematical/astronomical calculations | Monospace, warm background |
-| `observation_table` | Structured observational data | Tabular, monospace numbers |
-| `sketch` | Pen drawings, landscape profiles | Dashed border, description |
-| `crossed_out` | Struck-through passages | Strikethrough, red border |
-| `interlinear` | Text added between lines | Yellow background |
-| `bibliographic_ref` | Citations of publications | Brown left border |
-| `coordinates` | Geographic coordinate notations | Blue background, monospace |
-| `instrument_list` | Scientific instruments with prices | Orange background |
+---
 
-## Quick Start
+## Pipeline architecture
 
-### 1. Install
+Each folio goes through the following stages in `src/pipeline.py`:
+
+```
+Image
+  │
+  ▼
+[1] Region detection          region_detection.py     thinking: high
+  │   Humboldt-specific layout regions (entry headings, marginalia,
+  │   calculation blocks, sketches, …)
+  │
+  ├──▶ [2a] M2 whole-page free read     ─┐
+  │         whole_page_reading.py        │  concurrent
+  └──▶ [2b] M3 whole-page structured ───┘  (different model → diversity)
+  │         whole_page_reading.py
+  │
+  ▼
+[3] Per-region crop reads (M1 × k) + alignment-locked merge
+      transcription.py  ←→  consensus.py
+      Each region is cropped (neighbours masked) and read k times.
+      M1 crops + M2/M3 whole-page candidates are merged per region:
+        • tokens ALL candidates agree on → locked automatically
+        • disagreements → resolved by the best model from crop + page
+  │
+  ▼
+[4] Layout pass                layout.py               thinking: medium
+      Whole-page deduplication / contamination / bleed-over fix.
+      No rewriting — only line ownership decisions across regions.
+  │
+  ├──────────────────────────┐
+  ▼                          ▼
+[5] NER              [8] Ground-truth matching   (concurrent)
+[6] Geocoding              ground_truth.py
+[7] Geo-validation
+      ner.py / geocoding.py / geo_consistency.py
+  │
+  ▼
+[9]  HTML edition bundle     src/html_edition/
+[10] TEI-P5 XML              tei_writer.py
+```
+
+### The ensemble reading strategy
+
+The core innovation is a **heterogeneous ensemble** with three reading modes per folio:
+
+| Mode | What it does | Model | Thinking | Temperature |
+|------|-------------|-------|----------|-------------|
+| M1 (crops) | Reads each region from its own masked crop, k times | `gemini-3-flash-preview` | low | 0.2 |
+| M2 (whole-page free) | Reads all regions from the full page simultaneously | `gemini-3-flash-preview` | low | 0.2 |
+| M3 (whole-page structured) | Same but with a diversity-oriented prompt at high temperature | `gemini-3.5-flash` | medium | 1.0 |
+
+All three candidate sets feed into `consensus.py`, which locks tokens that every candidate agrees on and sends only the contested spans to `gemini-3.5-flash` (+ the crop and page image) to adjudicate.
+
+The layout pass then runs a single whole-page call to fix line-boundary bleed-over and cross-region duplicate lines that the padded crops can introduce — without touching any transcribed content it agrees with.
+
+---
+
+## Quick start
+
+### 1. Clone and install
 
 ```bash
-git clone <repo-url>
-cd humboldt-edition
-python -m venv .venv && source .venv/bin/activate
+git clone https://github.com/Maelkolb/Humboldt_The_Inaccurate_Edition.git
+cd Humboldt_The_Inaccurate_Edition
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
 ### 2. Set your API key
 
 ```bash
+# env var
 export GEMINI_API_KEY="your-key-from-aistudio.google.com"
+
+# or put it in a .env file in the project root
+echo GEMINI_API_KEY=your-key > .env
 ```
 
 ### 3. Add journal images
 
-Place your Humboldt journal page images in the `images/` folder. The pipeline handles filenames like:
-- `H0019734__67r.jpg` (SBB Berlin format → folio "67r")
-- `page_001.jpg` (generic format)
+Put your page images in an `images/` folder (or point `--images` at any folder).
+Recognised filename patterns:
 
-### 4. Run the pipeline
+- `H0017682__67r.jpg` — SBB Berlin format; folio label extracted automatically
+- `page_001.jpg` — generic sequential format
+
+### 4. Run
+
+**Using a runner script** (pre-configured for one journal):
 
 ```bash
-# Process all pages with embedded facsimile images
-python scripts/process_journal.py --images images/ --out output/ --embed-images
-
-# Process a subset for testing (first 3 pages)
-python scripts/process_journal.py --images images/ --out output/ --embed-images --end 3
-
-# Use higher thinking for difficult pages
-python scripts/process_journal.py --images images/ --out output/ --thinking high --embed-images
-
-# Compare against an existing scholarly transcription
-# (e.g. the corresponding TEI from edition-humboldt.de) — the HTML viewer
-# then gets a per-page Gemini / Ground Truth / Diff toggle.
-python scripts/process_journal.py \
-    --images images/ --out output/ --embed-images \
-    --ground-truth-tei reference/H0017682.xml
+python run_england.py     # England 1790
+python run_america.py     # American journals
+python run_austr.py       # Austria 1797/98
 ```
 
+Edit the `JOURNAL_DIR`, `IMAGE_FOLDER`, `OUTPUT_FOLDER` paths at the top of the script before running.
 
-## Output Files
+**Using the generic CLI:**
+
+```bash
+# All pages, embed facsimiles in the HTML
+python scripts/process_journal.py --images images/ --out output/ --embed-images
+
+# First 5 pages only (testing)
+python scripts/process_journal.py --images images/ --out output/ --end 5
+
+# With a ground-truth TEI for comparison tabs
+python scripts/process_journal.py \
+    --images images/ --out output/ --embed-images \
+    --ground-truth-tei path/to/H0017682.xml
+```
+
+---
+
+## CLI reference
+
+```
+--images PATH              Folder of journal page images
+--out PATH                 Output folder
+--start N / --end N        0-based slice of the image list
+--model ID                 Default Gemini model for all stages
+--model-layout ID          Override model for region detection
+--model-transcription ID   Override model for M1/M2/M3 reads
+--model-merge ID           Override model for the merge resolver + layout pass
+--model-ner ID             Override model for NER
+--model-geo-validation ID  Override model for geo-validation
+--model-ground-truth ID    Override model for GT matching
+--thinking LEVEL           Default thinking level (none/low/medium/high)
+--thinking-layout          Thinking for detection (default: high)
+--thinking-transcription   Thinking for reads (default: low)
+--thinking-merge           Thinking for merge + layout (default: medium)
+--ensemble-k N             Number of M1 crop reads per region (default: 1)
+--transcription-workers N  Concurrent per-region workers (default: 6)
+--no-consistency           Skip Step 4 (layout pass)
+--no-geo-validation        Skip geo-validation
+--ground-truth-tei PATH    GT TEI — enables Gemini/GT/Diff toggle in the viewer
+--embed-images             Base64-embed facsimiles in index.html
+--image-ref-prefix URL     Reference facsimiles via an external URL prefix
+--title TEXT               HTML edition title
+```
+
+All model IDs and thinking levels can also be set as environment variables (`MODEL_ID`, `MODEL_ID_MERGE`, `THINKING_LEVEL_MERGE`, `LLM_MAX_CONCURRENCY`, etc.). See `src/config.py` for the full list.
+
+---
+
+## Output structure
 
 ```
 output/
 ├── json/
-│   ├── page_0001.json                # Per-page results (regions, entities, metadata)
+│   ├── page_0001.json            per-page result (regions, entities, locations, GT)
 │   └── ...
-├── digital_edition_complete.json     # All results
-├── digital_edition.tei.xml           # Full-book TEI XML (always written)
-├── humboldt_edition/                 # Self-contained edition bundle
-│   ├── index.html                    #   • side-by-side facsimile + transcription
-│   ├── assets/edition.css            #   • stylesheet (external)
-│   ├── assets/edition.js             #   • behaviour: nav, zoom, search, toggles
-│   ├── tei/folio_<label>.tei.xml     #   • one real TEI file per folio (download)
-│   ├── tei/digital_edition.tei.xml   #   • full-book TEI (copied in)
-│   └── facsimiles/<image>            #   • page images (unless --embed-images
-│                                     #     or --image-ref-prefix is used)
-├── humboldt_edition.zip              # The bundle above, zipped for distribution
-└── geocode_cache.json
+├── digital_edition_complete.json all pages combined
+├── digital_edition.tei.xml       full-book TEI-P5 XML
+├── geocode_cache.json            location resolution cache (reused on resume)
+└── humboldt_england_1790.html    self-contained HTML edition (or as named by runner)
 ```
 
-The HTML edition offers a Gemini / Ground Truth / Diff toggle (only on pages
-where `--ground-truth-tei` produced a match), a Document/Reading view switch,
-per-page TEI download, entity highlighting, and a Leaflet map of geolocated
-places.
+The HTML edition includes:
+- Side-by-side facsimile + transcription with region highlighting
+- Per-region language badges (DE / FR / LA / ESP)
+- Entity highlighting for persons, locations, instruments, species, …
+- Leaflet map of all geolocated places
+- Per-page TEI-P5 download
+- **Gemini / Ground Truth / Diff** toggle on pages where GT matching ran
 
+The pipeline resumes automatically: pages with an existing non-empty JSON in `json/` are skipped.
 
-## Editorial Conventions
+---
 
-The transcription follows diplomatic conventions:
-- Original spelling preserved 
-- Uncertain readings marked `[?]`
-- Crossed-out text rendered with strikethrough
-- Interlinear additions clearly marked
-- Languages tracked per region (DE/FR/LA/ESP badges)
-- Editorial notes for ink changes, illegible passages, later additions
+## Region types
 
-## Ground-Truth Comparison (optional)
+| Type | Description |
+|------|-------------|
+| `entry_heading` | Numbered entry header (e.g. "N. 50-52", "9)") |
+| `main_text` | Primary journal prose |
+| `marginal_note` | Annotations in the margins |
+| `pasted_slip` | Separate slip of paper physically pasted to the page |
+| `calculation` | Astronomical / mathematical computation blocks |
+| `observation_table` | Structured observational data (angles, times, measurements) |
+| `sketch` | Pen drawings, landscape profiles, diagrams |
+| `crossed_out` | Struck-through passages |
+| `instrument_list` | Scientific instruments, often with prices |
+| `page_number` | Folio number (usually top corner) |
 
-When the pipeline is run with `--ground-truth-tei PATH`, every detected
-region on every page is matched against the corresponding text in the
-provided ground-truth TEI (typically the scholarly transcription published
-on [edition-humboldt.de](https://edition-humboldt.de/)).
+---
 
-For each page where the GT folio is found:
+## Entity types
 
-1. A multimodal Gemini call receives the image, the detected bounding
-   boxes + Gemini's own (often noisy) transcription, **and** the full GT
-   text for that folio.
-2. The model returns one matched GT segment per detected region.
-3. Those matches are stored alongside the Gemini transcription on each
-   region — both end up in the JSON, neither overwrites the other.
+NER runs on the assembled full text of each page and produces eight entity classes:
 
+| Class | What is extracted |
+|-------|------------------|
+| `Person` | Named persons: scientists, instrument makers, local informants, etc. |
+| `Location` | Named places: cities, rivers, mountains, missions, forts |
+| `Indigenous_Group` | Peoples, ethnic groups and language groups (mainly American journals) |
+| `Instrument` | Scientific instruments and measuring devices |
+| `Species` | Plants, animals, minerals by name (Latin or vernacular) |
+| `Publication` | Books, maps, journals and atlases cited by Humboldt |
+| `Celestial_Object` | Stars, planets, constellations in an astronomical context |
+| `Measurement` | Coordinates, temperatures, pressures and other quantified readings |
 
+---
+
+## Optional post-processing: entity linking
+
+After the main pipeline finishes, you can link extracted persons, places and species to the **edition-humboldt-digital** authority registers:
+
+```bash
+# Build the index from a local clone of telota/edition-humboldt-digital
+python scripts/link_entities.py \
+    --input output/digital_edition_complete.json \
+    --register path/to/edition-humboldt-digital \
+    --out output/digital_edition_linked.json
+```
+
+Matching uses fuzzy string search (configurable via `--fuzzy-cutoff`, default 0.9). Results are stored as `ehd_uri` on each matched entity mention and written to a separate output JSON so the original is never overwritten.
+
+---
+
+## Ground-truth comparison
+
+Pass `--ground-truth-tei PATH` to enable per-page comparison against an existing scholarly transcription (TEI-P5 from edition-humboldt.de or any compatible file).
+
+For each page whose folio label appears in the TEI:
+1. A multimodal call receives the page image, the detected regions and Humboldt's own transcription text.
+2. The model assigns a GT text segment to each detected region.
+3. Both the pipeline transcription and the matched GT segment are stored on the region object — neither overwrites the other.
+4. The HTML viewer exposes a **Gemini / Ground Truth / Diff** three-way toggle for those pages.
+
+---
+
+## Configuration
+
+Key environment variables (can also go in `.env`):
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `GEMINI_API_KEY` | — | Required |
+| `MODEL_ID` | `gemini-3-flash-preview` | Default model for all stages |
+| `MODEL_ID_BEST` | `gemini-3.5-flash` | Used for merge resolver + layout pass |
+| `MODEL_ID_MERGE` | (MODEL_ID_BEST) | Override merge + layout model |
+| `LLM_MAX_CONCURRENCY` | `8` | Global cap on simultaneous Gemini calls |
+| `ENSEMBLE_K_CROP` | `1` | M1 crop reads per region |
+| `TEMPERATURE_READ` | `0.2` | M1/M2 read temperature |
+| `TEMPERATURE_READ_STRUCTURED` | `1.0` | M3 temperature (kept high for diversity) |
+| `TEMPERATURE_MERGE` | `0.0` | Merge + layout temperature |
+| `PAGE_READ_MAX_PX` | `2000` | Longest-side resolution for whole-page reads |
+| `EHD_REGISTER_DIR` | — | Path to local edition-humboldt-digital clone (entity linker) |
+
+---
+
+## Editorial conventions
+
+- Original orthography and punctuation preserved throughout
+- Uncertain readings marked `[?]`; the merge resolver attempts to resolve them from the ink before locking them in
+- Crossed-out passages retained with strikethrough
+- Interlinear additions and marginal notes each get their own region with explicit type
+- Languages tracked per region (DE / FR / LA / ESP)
+
+---
 
 ## License
 
