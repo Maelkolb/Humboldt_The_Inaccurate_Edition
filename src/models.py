@@ -238,6 +238,11 @@ class GeoLocation:
     geonames_id: Optional[int] = None   # numeric GeoNames feature ID (P1566)
     # Provenance of the resolved data
     source: str = "nominatim"           # "wikidata" | "nominatim"
+    # Set only when geo_consistency.validate_locations re-geocoded this entry
+    # after the original `name` lookup was judged implausible — the corrected/
+    # disambiguated query string actually used to resolve lat/lon, e.g.
+    # "Rochester, Kent, England" when `name` is just "Rochester".
+    resolved_query: Optional[str] = None
 
 
 @dataclass
@@ -259,7 +264,11 @@ class PageResult:
     # region's ``content_pre_consistency`` snapshot it keeps the pass auditable.
     consistency_issues: List[Dict[str, Any]] = field(default_factory=list)
     # Geolocation validation report: one verdict per resolved location
-    # ({"name", "verdict", "confidence", "reason"}).
+    # ({"name", "verdict", "confidence", "reason", "suggested_query",
+    #   "retry_result"}). "retry_result" is only present for locations judged
+    # invalid: "corrected" (re-geocoded successfully, see GeoLocation
+    # .resolved_query), "still_invalid" (retry also failed), or
+    # "no_query_suggested".
     geo_validation: List[Dict[str, Any]] = field(default_factory=list)
 
     @property
@@ -322,6 +331,7 @@ class PageResult:
                 wikidata_id=loc.get("wikidata_id"),
                 geonames_id=loc.get("geonames_id"),
                 source=loc.get("source", "nominatim"),
+                resolved_query=loc.get("resolved_query"),
             )
             for loc in d.get("locations", [])
         ]

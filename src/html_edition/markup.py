@@ -30,6 +30,25 @@ def find_entity_spans(text: str, entities: List[Entity]):
             cur = e
     return result
 
+_ED_MARKER_RE = re.compile(r'~~(.+?)~~|<u>(.+?)</u>|(\w+)?\[\?\]', re.DOTALL)
+
+def strip_editorial_markers(text: Optional[str]) -> str:
+    """Strip this project's inline editorial marker syntax (``~~struck~~``,
+    ``<u>underline</u>``, ``word[?]``) from *text*, keeping the underlying
+    words. Fields like ``Entity.context`` are raw excerpts of transcribed
+    text and can contain this markup verbatim; used as-is inside an HTML
+    attribute (e.g. a tooltip's ``title="..."``), the marker syntax survives
+    ``html.escape`` (it has no special characters) and is then picked up by
+    :func:`postprocess_editorial`'s page-wide regex, which injects a real
+    ``<del>``/``<span>`` tag *inside* the attribute value and corrupts the
+    surrounding markup. Attribute/tooltip text must go through this first.
+    """
+    if not text:
+        return ""
+    def _repl(m: "re.Match[str]") -> str:
+        return m.group(1) or m.group(2) or m.group(3) or ""
+    return _ED_MARKER_RE.sub(_repl, text)
+
 def _apply_editorial_markup(escaped: str) -> str:
     """Convert in-text editorial markers to HTML.
 

@@ -3,26 +3,27 @@
 Geocoders return a coordinate for almost any string, so a misread or ambiguous
 place name can resolve somewhere implausible for Humboldt's journal. The model
 judges, from the page text alone, whether each resolved
-:class:`~src.models.GeoLocation` is the place actually named; confidently invalid
-ones are dropped. Per-location verdicts are returned for auditing. Fails open
-(keeps everything) on any error.
+:class:`~src.models.GeoLocation` is the place actually named. Any location
+judged invalid is re-geocoded with the model's own proposed correction before
+being dropped — dropped only if that retry also fails. Per-location verdicts
+are returned for auditing. Fails open (keeps everything) on any error.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 from google import genai
 
+from .geocoding import geocode_query
 from .llm import generate_json
 from .models import Entity, GeoLocation
 
 logger = logging.getLogger(__name__)
 
-# Drop a location only when the model is at least this confident it is wrong.
-_DROP_CONFIDENCE = 0.6
 # Truncate the page-context snippet sent to the model.
 _CONTEXT_CHARS = 2000
 
@@ -55,6 +56,13 @@ to. Mark a result INVALID only when it clearly makes no sense, e.g.:
 Be conservative: historical names, alternative spellings and small/obscure
 places are NOT grounds for rejection. When unsure, mark it VALID.
 
+When you mark a result INVALID, also consider whether the page context makes
+a better search query inferable — e.g. adding a disambiguating region/country
+("Rochester, Kent, England" instead of "Rochester"), or fixing an obvious
+misreading. If so, include it as "suggested_query" so the geocoder can be
+re-run with it. Leave "suggested_query" as an empty string when VALID, or
+when no better query is apparent.
+
 PAGE CONTEXT (transcribed text excerpt):
 ```
 {page_context}
@@ -69,7 +77,8 @@ Respond ONLY with a JSON array, one object per location, SAME ORDER as input:
     "name": "<the input name>",
     "verdict": "valid" | "invalid",
     "confidence": 0.0,
-    "reason": "<short justification>"
+    "reason": "<short justification>",
+    "suggested_query": "<corrected/disambiguated search string to re-geocode, or "">"
   }}
 ]
 """
@@ -104,12 +113,19 @@ def validate_locations(
     page_context: str,
     model_id: str,
     thinking_level: str = "low",
+    geo_cache: Optional[Dict[str, Optional[Dict]]] = None,
 ) -> Tuple[List[GeoLocation], List[Dict[str, Any]]]:
     """Validate geocoded locations against the page text.
 
     Returns ``(kept_locations, reports)`` where *reports* holds one verdict
-    dict per input location. Locations judged invalid with confidence
-    >= ``_DROP_CONFIDENCE`` are removed from *kept_locations*.
+    dict per input location. Any location judged invalid is, when the model
+    proposed a "suggested_query", re-geocoded with that corrected query (see
+    :func:`src.geocoding.geocode_query`) instead of being dropped outright —
+    regardless of the model's confidence, since a free retry against a
+    query the model itself proposed carries no real downside. Only when the
+    retry also fails to resolve (or no query was proposed) is the location
+    removed from *kept_locations*. ``geo_cache`` is the same cross-page cache
+    used by :func:`src.geocoding.geocode_entities`, so retries are cached too.
     """
     if not locations:
         return locations, []
@@ -152,6 +168,7 @@ def validate_locations(
             "verdict": verdict,
             "confidence": conf,
             "reason": item.get("reason", ""),
+            "suggested_query": str(item.get("suggested_query", "")).strip(),
         }
         reports.append(report)
         if name:
@@ -159,10 +176,36 @@ def validate_locations(
 
     kept: List[GeoLocation] = []
     dropped = 0
+    corrected = 0
+    retry_session: Optional[requests.Session] = None
     for loc in locations:
         v = verdicts.get(loc.name)
-        if (v and v["verdict"] == "invalid"
-                and v["confidence"] >= _DROP_CONFIDENCE):
+        if v and v["verdict"] == "invalid":
+            query = v.get("suggested_query") or ""
+            retry_result = None
+            if query and query != loc.name:
+                if retry_session is None:
+                    retry_session = requests.Session()
+                retry_result = geocode_query(query, cache=geo_cache, session=retry_session)
+            if retry_result:
+                kept.append(GeoLocation(
+                    name=loc.name,
+                    lat=retry_result["lat"],
+                    lon=retry_result["lon"],
+                    display_name=retry_result["display_name"],
+                    wikidata_id=retry_result.get("wikidata_id"),
+                    geonames_id=retry_result.get("geonames_id"),
+                    source=retry_result.get("source", "nominatim"),
+                    resolved_query=query,
+                ))
+                v["retry_result"] = "corrected"
+                corrected += 1
+                logger.info(
+                    "  Re-geocoded %r via corrected query %r -> %.4f, %.4f",
+                    loc.name, query, retry_result["lat"], retry_result["lon"],
+                )
+                continue
+            v["retry_result"] = "still_invalid" if query else "no_query_suggested"
             dropped += 1
             logger.info(
                 "  Dropped implausible location %r (%s) — %s",
@@ -172,7 +215,7 @@ def validate_locations(
         kept.append(loc)
 
     logger.info(
-        "  Geo-validation: kept %d / %d locations (%d dropped).",
-        len(kept), len(locations), dropped,
+        "  Geo-validation: kept %d / %d locations (%d dropped, %d corrected via retry).",
+        len(kept), len(locations), dropped, corrected,
     )
     return kept, reports
