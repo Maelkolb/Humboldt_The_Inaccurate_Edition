@@ -1,0 +1,49 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 29r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 29r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="29r" facs="H0017682__29r.jpg" />
+            <div type="diaryEntry">
+                <head>Q.</head>
+            </div>
+            <div type="diaryEntry">
+                <head>U.</head>
+                <p>F. <persName>Füßel</persName> 4.</p>
+            </div>
+            <div type="diaryEntry">
+                <head>V.</head>
+                <p>S.<lb />Schiefer 1. 4.<lb />
+                    <placeName>Stoney Middleton</placeName> 13.</p>
+                <p>W. <persName>Wells</persName> 1. 3.</p>
+                <p>T. Toadstone 16.</p>
+            </div>
+            <div type="diaryEntry">
+                <head>Y.</head>
+            </div>
+            <div type="diaryEntry">
+                <head>Z.</head>
+            </div>
+        </body>
+    </text>
+</TEI>

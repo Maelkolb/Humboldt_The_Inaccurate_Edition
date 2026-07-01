@@ -1,0 +1,42 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 3r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 3r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="3r" facs="H0017682__3r.jpg" />
+            <fw type="folNum">3.</fw>
+            <div type="diaryEntry">
+                <p>machte die Schiffarth im <placeName ref="Ärmelkanal">Kanale</placeName> lebhaft, das Contoir der Genuesen in <placeName>London</placeName> brachte diesen Werth<lb />empor, die engl. Wolle ging <del rendition="#s">und</del> von da aus, die unauf-<lb />hörlichen Zwistigkeiten mit Frank-<lb />reich machten eine Flotte und also auch einen Hafen im<lb />
+                    <placeName ref="Ärmelkanal">Kanale</placeName> nothwendig, die Barbarei<lb />in welcher <placeName>Irland</placeName> so spät<lb />noch lag, ließ das natürliche<lb />Handelsverkehr zwischen Eng-<lb />land und <placeName>Irland</placeName> nicht auf-<lb />blühen .....</p>
+            </div>
+            <div type="diaryEntry">
+                <head>
+                    <hi rendition="#u">
+                        <placeName ref="Somerset">Sommersetshire</placeName>
+                    </hi>
+                </head>
+                <p>Dipsacus sylvestris, D. fullonum u. wenn ich nicht geirrt, auch<lb />D. laciniatus wachsen in <placeName ref="Somerset">Som- mersetsh</placeName> u <placeName ref="Gloucestershire">Glocestersh.</placeName> wild. <persName ref="Carl von Linné">Linné</persName> hielt gewiß mit Un-<lb />recht D. fullonum, der für d. Tuchmanufakt. so wichtig ist, hier</p>
+            </div>
+        </body>
+    </text>
+</TEI>

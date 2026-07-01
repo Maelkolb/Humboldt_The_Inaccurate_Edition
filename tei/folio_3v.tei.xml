@@ -1,0 +1,34 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 3v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 3v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="3v" facs="H0017682__3v.jpg" />
+            <fw type="folNum">4.</fw>
+            <div type="diaryEntry">
+                <p>eine bloße Abart von D. sylvestris. S. Fisch. bot. Abhandl.<lb />p 18. Ob aber D. fullon in<lb />
+                    <placeName>England</placeName> einheimisch od. nur<lb />aus den Zeiten der Tuchmanufactur verwildrt sey, entscheide ich nicht.<lb />In <placeName ref="Deutschland">Teutschland</placeName> ist sie aber für zweifelhaft <persName ref="Albrecht Wilhelm Roth">Roth</persName> Flor. ger-<lb />man. II p 162.<lb />Die Grafschaft enthält Gal, wie Blei, das nicht so fein sein als das <placeName ref="Derbyshire">Derbyshire'sche</placeName> ist, u. Teffel. Mit dem Teffel zeichnete man die hie- sigen Schafe u. verderbt die<lb />Wolle, dieweil <del rendition="#s">dann</del> in <placeName>Spanien</placeName> die<lb />ihrige mit Ochre verdorben. die <del rendition="#s">neuen</del> Vorschläge (Lewis<lb />Zusammenhang der Künste II 76)<lb />mit Talg, Teer u. Kohlenstaub zu zeichnen, sind also noch im- mer nicht befolgt.<lb />Am <placeName ref="River Avon">Avon</placeName> bei <placeName>Bath</placeName> war die</p>
+            </div>
+        </body>
+    </text>
+</TEI>

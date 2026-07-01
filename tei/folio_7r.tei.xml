@@ -1,0 +1,38 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 7r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 7r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="7r" facs="H0017682__7r.jpg" />
+            <fw type="folNum">11.</fw>
+            <div type="diaryEntry">
+                <p>In <placeName ref="Derbyshire">Derbyshire</placeName> heißt das<lb />lich. tartar. welch liverwort<lb />It is gathered for dyers and<lb />gives a purple colour. Pil-<lb />kington's View of the pre-<lb />sent state of <placeName ref="Derbyshire">Derbyshire</placeName>
+                    <lb />Vol. I p 478.</p>
+                <p>
+                    <placeName ref="Poole's Cavern">Poole's hole</placeName>. 560 yards lang. Sie liegt im Südwesten von <placeName ref="Buxton">Buxton</placeName> an dem Flüßchen <placeName ref="River Wye">Wye</placeName>, gegen<lb />das hohe Kalkgebirge <placeName ref="Axe Edge">Axe edge</placeName>
+                    <lb />zu. Weil die Höle eng ist, so bilden sich hier schönere Sta-<lb />laktiten, als die in Peak's<lb />hole. Die größten sind der<lb />
+                    <placeName>flitch of Bacon</placeName> u. der <placeName>queen of Scots pillar</placeName> den<lb />die unglückliche <persName ref="Mary Stuart">Maria</persName> während<lb />ihrer Gefangenschaft in Chats worth besucht haben soll.<lb />Ein kleiner Bach fließt aus</p>
+            </div>
+        </body>
+    </text>
+</TEI>

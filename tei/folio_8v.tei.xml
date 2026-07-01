@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 8v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 8v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="8v" facs="H0017682__8v.jpg" />
+            <fw type="folNum">14.</fw>
+            <div type="diaryEntry">
+                <p>kantigen Bruchstücken, hart,<lb />sehr schwer zersprengbar, musch- licht u. schwer. Er hat aber den wircklich "grünen Schiefer- tigen Ueberzug, den die Ba- salte am <placeName ref="Dransberg">Dransberge</placeName> u. Wie- serum zeigen. Er ist unge-<lb />mein schimmernd, wegen der fein<lb />eingesprengten Körner von Ba- salt. <hi rendition="#u">Grypsplitz</hi>. Große Massen<lb />von Chrys. od. Olivin, wie die <placeName ref="Uechtritz">Uechtr.</placeName> u. <placeName ref="Stein">Steiner</placeName> Basalte<lb />enthalten, fand ich nirgends.<lb />Ueberhaupt ist der Gips sehr gleichmäßig eingesprengt u. <del rendition="#s">fast</del> wie die Quarzkörner in einem Sandstein vertheilt. Der <hi rendition="#u">
+                        <placeName ref="Stolpen">Stolpner</placeName>
+                    </hi> Basalt, wel- che die <placeName ref="Antrim">Antrimmer</placeName> Basalte so zum Theil auch die <placeName ref="Island">istländischen</placeName> haben u. die<lb />nur Spuren einer ordentlichen massirenden Gipscrystallisation</p>
+            </div>
+        </body>
+    </text>
+</TEI>

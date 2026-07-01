@@ -1,0 +1,40 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 2v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 2v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="2v" facs="H0017682__2v.jpg" />
+            <fw type="folNum">2.</fw>
+            <div type="diaryEntry">
+                <p>Gegen- Hypothesen, da Gesinnungen für die d. k. Wasser giebt, am Theil sind, abzulangern. <placeName ref="Chippenham">Chippenham</placeName>
+                    <del rendition="#s">war</del> fast die Residenz <persName ref="Alfred der Große">Alfreds d. Gr.</persName> sein. Ueberhaupt scheint damals<lb />der westl. Theil von <placeName ref="England">England</placeName> der angebautere gewesen zu<lb />sein. Jetzt hat sich die<lb />Kultur ganz gegen Osten<lb />gezogen. War das ältere<lb />Verhältniß nicht natürlicher,<lb />da die Einfahrt in den Bristol<lb />Channel bequemer, als die in<lb />die <placeName ref="Themse">Themse</placeName>, <del rendition="#s">u.</del> da das westl.<lb />
+                    <placeName ref="England">England</placeName> an Landesprodukten reicher, die Kommunication mit <placeName ref="Irland">Ireland</placeName> näher und<lb />
+                    <placeName ref="Milford Haven">Milford</placeName> ein sichrer Hafen<lb />für die Flotte als Ports-<lb />mouth ist? Allerdings. Aber d. auswärtige Interesse gab d.<lb />Lage eine entgegengesetzte Rich-<lb />tung. Der flämische Handel</p>
+                <note hand="#author" place="right">
+                    <p>
+                        <persName ref="Alfred der Große">Alfred</persName> vertrieb 884 den Dänen <placeName ref="Rochester">Rochester</placeName> und <placeName ref="London">London</placeName>.</p>
+                </note>
+            </div>
+        </body>
+    </text>
+</TEI>

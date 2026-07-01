@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 28v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 28v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="28v" facs="H0017682__28v.jpg" />
+            <div type="diaryEntry">
+                <p>G. J. K. Kalkstein 2. Kupfer 5. L.</p>
+                <p>M.<lb />Mineralien 5. 11. 12. 13. 16. Mandelstein 16. N.<lb />
+                    <lb />O.<lb />
+                    <lb />P. <placeName ref="Poole's Cavern">Poole's hole</placeName> 11.</p>
+            </div>
+        </body>
+    </text>
+</TEI>

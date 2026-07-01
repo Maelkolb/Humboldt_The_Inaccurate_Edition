@@ -1,0 +1,42 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 20r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 20r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="20r" facs="H0017682__20r.jpg" />
+            <div type="diaryEntry">
+                <head>
+                    <hi rendition="#u">
+                        <placeName ref="Derbyshire">Derbyshire</placeName>
+                    </hi>
+                </head>
+                <p>
+                    <persName ref="James Pilkington">Pilkington</persName> II p 57 klagt sehr<lb />über die rohen Sitten der<lb />Einwohner des <placeName ref="Peak District">Peak's</placeName>. Aus den Ge- setzen kann man auf ihren alten<lb />Zustand schliessen. Unter <persName ref="Edward I.">Edward I</persName>
+                    <lb />wurde ein Gesetz gemacht, nach dem jeder Dieb eine Bleimine be- stiehlt mit einer Hand an einen Tisch genagelt werden <del rendition="#s">sollte</del> und<lb />entweder verhungern od. &lt;sup&gt;+&lt;/sup&gt; mit<lb />der andern Hand die angenagelte abschneiden soll.</p>
+                <note hand="#author" place="right">
+                    <p>+ als das einzige Rettungsmittel,</p>
+                </note>
+            </div>
+        </body>
+    </text>
+</TEI>

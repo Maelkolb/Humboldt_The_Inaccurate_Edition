@@ -1,0 +1,34 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 5v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 5v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="5v" facs="H0017682__5v.jpg" />
+            <fw type="folNum">8.</fw>
+            <div type="diaryEntry">
+                <p>
+                    <persName ref="Friedrich Christian Ludwig Faber">Faber</persName> neue Beiträge zur Mineralgesch. I. p 455. Un- sere Unwissenheit geht so-<lb />gar so weit, daß uns d. Lichen noch einigen Nutzen, Lichen oder vielm. Croton tinctor, d. den Tournesol im <placeName ref="Gallargues-le-Montueux">Grand Galargues</placeName>, ist d. Orseille / v. <persName ref="Jacques-François Demachy">Demachy</persName> bekannt im Gmelin II p 273/ gemacht. Technol. Wörterbuch<lb />II 544. d. asiatischen Pur- pur ist nicht so unwichtig als man d. gewöhnlich glaubt. Bei einer guten Staatsverf. steht auch auf d. Schimmer als zu Nationalreichthum be- tragen. — Im Jhr 1300— wurde d. Farbstoff d. L. Roccel- la in d. <placeName>Levante</placeName> dadurch entdekt, daß ein florentiner Kaufmann auf den Felsen seine Wasser abschlug u. d. Moos zu seinen Füßen...</p>
+            </div>
+        </body>
+    </text>
+</TEI>

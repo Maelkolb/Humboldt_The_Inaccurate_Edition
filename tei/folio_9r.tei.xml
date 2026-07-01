@@ -1,0 +1,34 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 9r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 9r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="9r" facs="H0017682__9r.jpg" />
+            <fw type="folNum">.15.</fw>
+            <div type="diaryEntry">
+                <p>angedeuteten Formen, vermischte ich ganz im rowly ragg. Die Mischung der Glieder, denn der Stein ist überhaupt<lb />so verschieden, daß wenn man wie <persName ref="Richard Kirwan">Kirwan</persName> die Arten<lb />nach gesetztheiligen Brüchen<lb />trennen wollte, u sagt er, so viele Arten, als Individua<lb />geben würde. Vergleiche z. B.<lb />die verschiedenen Analysen des<lb />Trapps in <persName ref="Barthélemy Faujas de Saint-Fond">Faujas de St Fond</persName>
+                    <lb />Abhandl. vom Trapp p 57 u Philos. Transactions for 1782.<lb />p 333.<lb />Bei <placeName ref="Halesowen">Halesowen</placeName> erscheinen zwei kegelförmige, zum Theil mit Buschwerk belegte Hügel.<lb />Erste Thon ebene, die Nähe<lb />der <placeName ref="Rowley Rag Hills">Rowlyragghügel</placeName> und des rothen Sandsteins hier nicht</p>
+            </div>
+        </body>
+    </text>
+</TEI>

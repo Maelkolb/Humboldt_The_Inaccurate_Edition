@@ -1,0 +1,38 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 6r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 6r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="6r" facs="H0017682__6r.jpg" />
+            <fw type="folNum">9</fw>
+            <div type="diaryEntry">
+                <p>Ich liebe sehr. <persName ref="Domenico Maria Manni">Manni</persName>
+                    <lb />Comment. de Florentin. in- uentis c. 20. Wir leben in<lb />einem Zeitalter, wo uns ihr ist solcher Herrn. Projekte u Herren brauchen. Zu einem MSS. zu Mater. technologica<lb />plantae tinctor. n. 468.<lb />
+                    <persName ref="Niels Horrebow Mohr">Mohr</persName> sagt noch in seinem Forsøg til en <placeName>Island</placeName>sk Na-<lb />turhistorie p 230 „ L. tartareus, Litmusmoos, Hvidtblad od. Kork. Dies<lb />Moos ist seit den ältesten<lb />Zeiten in <placeName>Norwegen</placeName>, <placeName>Schweden</placeName> u. den <placeName ref="Färöer">Färöinseln</placeName> u. <placeName>Island</placeName> zum Färben gebraucht worden.<lb />Der Indigo u. andre Ausländ. Farbstoffe haben jezt den<lb />Gebrauch desselben fast ganz<lb />verdrängt. Der Vorurtheil, daß<lb />die Farbe daraus nicht so<lb />hoch, glänzend u. haltbar</p>
+                <note hand="#author" place="right">
+                    <p>n</p>
+                </note>
+            </div>
+        </body>
+    </text>
+</TEI>

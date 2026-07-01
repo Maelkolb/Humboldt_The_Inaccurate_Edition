@@ -1,0 +1,46 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 28r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 28r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="28r" facs="H0017682__28r.jpg" />
+            <fw type="folNum">d.</fw>
+            <div type="diaryEntry">
+                <note hand="#author" place="right">
+                    <p>d.</p>
+                </note>
+                <p>
+                    <placeName ref="Alston">Alston</placeName>. 2.</p>
+                <note hand="#author" place="right">
+                    <p>e.</p>
+                </note>
+                <p>b. Basalt 13.</p>
+                <p>f. Fibre 1.5.</p>
+                <p>E. <placeName ref="Castleton">Castleton</placeName> 12.</p>
+                <note hand="#author" place="right">
+                    <p>g.</p>
+                </note>
+            </div>
+        </body>
+    </text>
+</TEI>

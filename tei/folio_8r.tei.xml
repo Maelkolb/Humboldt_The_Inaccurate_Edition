@@ -1,0 +1,36 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 8r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 8r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="8r" facs="H0017682__8r.jpg" />
+            <fw type="folNum">13.</fw>
+            <div type="diaryEntry">
+                <p>
+                    <placeName ref="Stoney Middleton">Stoney - Middelton</placeName> fand ich<lb />in großer Menge Arenaria<lb />saxatilis, diese seltene Pflanze,<lb />die in <placeName ref="Deutschland">Teutschland</placeName> nur bei <placeName ref="Herzberg am Harz">Herzberg am Harze</placeName> entdeckt<lb />ist.<lb />
+                    <hi rendition="#u">Rowly ragg</hi>. <hi rendition="#u">Basalt</hi>. Auf der Straße nach <placeName ref="Dudley">Dud- ley</placeName> bei dem schönen Dorfe<lb />
+                    <placeName ref="Halesowen">Hales owen</placeName> liegt alles voll<lb />von Rowly ragg, den <persName ref="Richard Kirwan">Kirwan</persName> u. <persName ref="Tiberius Cavallo">Cavallo</persName> als eine eigene<lb />Steinart aufführen. Rowly ragg<lb />ist ein bloßer Trivialname<lb />für Basalt, wie die deutschen Namen Unedelstein u. Stolpe- nerstein. Ich fand diese engli- sche Abänderung des Basalts von schmutzig grauer Farbe, im Bruche uneben, mattgl.</p>
+            </div>
+        </body>
+    </text>
+</TEI>

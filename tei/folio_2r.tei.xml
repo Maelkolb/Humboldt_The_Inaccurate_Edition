@@ -1,0 +1,45 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 2r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 2r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="2r" facs="H0017682__2r.jpg" />
+            <fw type="folNum">1.</fw>
+            <div type="diaryEntry">
+                <head>
+                    <hi rendition="#u">
+                        <placeName ref="Wiltshire">Wiltshire</placeName>
+                    </hi>
+                </head>
+                <p>Viel Cassemirfabriken in <placeName ref="Wiltshire">Wiltsh.</placeName>
+                    <lb />
+                    <placeName ref="Gloucestershire">Glocestersh.</placeName> u. <placeName ref="Somerset">Sommersetsh</placeName>, be-<lb />sonders in <placeName>Bath</placeName> in Trow-<lb />bridge u. <placeName>Bradford</placeName>. Die Schaa-<lb />fe in diesen südwestl. Grafschaf-<lb />ten sind zweischürig, in <placeName ref="Leicestershire">Leicester</placeName>,<lb />
+                    <placeName ref="Lincolnshire">Lincoln</placeName> u <placeName ref="Warwickshire">Warwickshîre</placeName> aber gröstentheils einschürig. Die Fär- ber dringen sich alle an dem <placeName>Avon</placeName>, dessen reines Wasser zum<lb />Färben von vorzüglicher Güte<lb />ist.<lb />Es fehlt noch immer an genaue- ren chem. Untersuchungen über<lb />den Einfluß verschiedener Wasser-<lb />arten beim Färben, Bierbrauen Es ist eben so unbeständig den Vorzug des engl. Biers u. der engl. Fabriken, dem engl.<lb />Wasser zuzuschreiben, als d. un- leug. ist dem Einfluß des Wassers u. Atmosphäre bei so schweren</p>
+                <p>Den hohen Preis der Wolle<lb />im J. 1790 schrieb man<lb />in öffentl. Blättern den<lb />Kriegen u. Tuchmanufakturen zu. Die höchsten Preise waren<lb />South Down 1s. 2d. Ueber engl. Schafzucht<lb />im Allgemeinen und über ihr Alter, da<lb />schon für die Röm.<lb />Kaiser Wollner Zeuge<lb />zu <placeName>Winchester</placeName> ge-<lb />macht wurden S. D. <persName ref="James Anderson">Anderson</persName> in report<lb />of the Comittee of<lb />the highland Socie-<lb />ty, to whom the sub-<lb />ject of Shetland<lb />Wool was <del rendition="#s">committed</del> referred. 1790.</p>
+                <note hand="#author" place="right">
+                    <p>Welch per lb. 1s. 3d. Norfolk 1s. 1d. West<lb />Country 8d halfpeny</p>
+                </note>
+            </div>
+        </body>
+    </text>
+</TEI>

@@ -1,0 +1,38 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 5r</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 5r by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="5r" facs="H0017682__5r.jpg" />
+            <fw type="folNum">7.</fw>
+            <div type="diaryEntry">
+                <p>
+                    <persName ref="Louis-Auguste Dambourney">Dambourney</persName> / procedés sur les teintures solides que nos végétaux indigènes communiquent aux laines, <placeName>Paris</placeName> 1786 / und <persName ref="Georg Franz Hoffmann">Hofman</persName> / de vario lichen. usu <placeName ref="Erlangen">Erlangae</placeName> 1786 / — und verschrei-<lb />ben noch immer Farbestoffe 2) den 3 Kirchspielen <placeName ref="Templin">Templen</placeName> u. auch in südlichen <placeName>Frankreich</placeName>, die unserer einheimischen Flechten als Farbestoffe dienen könnten. Man kaufte Elend am Holländer u. Engländer und vergaßen daß dieser ihnen vom L. saxatilis machte, das bei uns jd. jeder Pfahl, jeder<lb />Stein trägt. S. v. in d. Lic. und Fabriken bei <placeName>Leith</placeName> in<lb />
+                    <placeName>Schottland</placeName> zu den 200 M. schon sich mit d. Sammeln v d. L. saxatilis beschäftigen</p>
+                <note hand="#author" place="left">
+                    <p>von<lb />les<lb />vég aux</p>
+                </note>
+            </div>
+        </body>
+    </text>
+</TEI>

@@ -1,0 +1,35 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 7v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 7v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="7v" facs="H0017682__7v.jpg" />
+            <fw type="folNum">12.</fw>
+            <div type="diaryEntry">
+                <p>der gelbe Granit. Auf dem<lb />Wege von <placeName>Buxton</placeName> bis zur Höle fand ich häufig Saxi-<lb />fraga granulata u. S. tri-<lb />dactylites. An den Eingängen d. Höle sah ich Viola monta-<lb />na, Alchemilla vulgaris u<lb />Polypodium vulgare.<lb />Bei <placeName ref="Poole's Hole">Pooles' hole</placeName> so viel Kalkbrennereien im Freien. Wie in <placeName>England</placeName> brennt man Kalk im Freien und Ziegel in breiten Oefen, gerade um-<lb />gekehrt, als in <placeName>Deutschland</placeName>.</p>
+                <p>
+                    <hi rendition="#u">Castleton</hi>. bei der <placeName>Flußspathmine</placeName> am hohen Wege nach <placeName>Buxton</placeName> zu, die Gentiana amarella, die<lb />von Gelb nur hier von un- gewöhnlicher Schönheit schien.<lb />In <placeName ref="Middleton Dale">Middelton dale</placeName> / wo</p>
+            </div>
+        </body>
+    </text>
+</TEI>

@@ -1,0 +1,41 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 9v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 9v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="9v" facs="H0017682__9v.jpg" />
+            <fw type="folNum">16.</fw>
+            <div type="diaryEntry">
+                <p>Basalt schliefern. Bei <placeName ref="Halesowen">Hales owen</placeName> viel Dian- theus prolifer!<lb />
+                    <hi rendition="#u">Bäder in <placeName ref="Derbyshire">Derbyshire</placeName>
+                    </hi>
+                    <persName ref="George Pearson">D. Pearson</persName>'s observations and<lb />experiments on Buxton water,<lb />
+                    <placeName ref="Matlock">Matlock</placeName>water &amp; <placeName ref="London">London</placeName> 1778.<lb />
+                    <hi rendition="#u">
+                        <placeName ref="Matlock">Matlock</placeName>
+                    </hi>
+                    <lb />Der Toadstone od. Channel, den ich in den hiesigen Blei-<lb />gruben besonders am Masson-<lb />hill und Heights of Abra-<lb />ham sahe, schien mir ein ächter Mandelstein mit ein gebackenem Kalkspath zu<lb />sein und ich kann Herrn Fauj.<lb />de St Fond, der eben diese<lb />Gegend besuchte, nicht beipflicht- ten, wenn er diesen Toad-<lb />stone, trotz <persName ref="Johann Jacob Ferber">Ferber</persName>, Trapp nen-<lb />nen will. Absh. wie Trapp p. 20.</p>
+            </div>
+        </body>
+    </text>
+</TEI>

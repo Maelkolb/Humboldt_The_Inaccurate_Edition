@@ -1,0 +1,34 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 6v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 6v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="6v" facs="H0017682__6v.jpg" />
+            <fw type="folNum">10.</fw>
+            <div type="diaryEntry">
+                <p>10. als die aus ostindischen Ma- terialien sei, ist ungemein roth, da auch bei der elendsten Bereitung ohne Anwendung von<lb />Salzen u. anderen Bindemit- teln, dieselbe oft so über-<lb />aus prächtig ausfällt. <persName ref="Hans Strøm">Prof. Ström</persName> versichert in der Maa- nedsskrift fra <placeName ref="Oslo">Christiania</placeName>
+                    <lb />daß der Hvidblik u. lick. tartar. von <placeName>Norwegen</placeName> nach <placeName>England</placeName> gehen, wo man ihn<lb />zu einer rothen u. blauen<lb />Farbe auf Wolle u. Kattun veredle. 1785 gingen allein 2 Schiffladungen von diesem lick. tartareus von <placeName>Norwegen</placeName> nach <placeName>England</placeName>. Die Isländer bereiten eine<lb />braune Farbe, die sie Böte- let nennen, aus dem lick. tartar. <persName ref="Johann Christian Fabricius">Fabricius</persName> Reise nach <placeName>Norwegen</placeName> p 66.</p>
+            </div>
+        </body>
+    </text>
+</TEI>

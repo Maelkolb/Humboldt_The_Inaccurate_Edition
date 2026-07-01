@@ -1,0 +1,32 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 29v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 29v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="29v" facs="H0017682__29v.jpg" />
+            <div type="diaryEntry">
+                <p>Flora.<lb />Dipsacus fullonum 3.<lb />sylvestris 3. Laciniatus 3.<lb />Hypnum crista castrensis 5.<lb />Lichen tartareus. 5.<lb />calcareus 5.<lb />capperatus 5<lb />Verrucaria pertusa 5.<lb />Saxifraga granulata 12.<lb />tridactylites 12.<lb />Alchemilla vulgaris 12.<lb />Viola montana 12.<lb />Polypodium vulgare 12.<lb />Gentiana amarella 12.<lb />Arenaria saxatilis 13.<lb />Dianthus prolifer 16.</p>
+            </div>
+        </body>
+    </text>
+</TEI>

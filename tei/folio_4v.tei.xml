@@ -1,0 +1,52 @@
+<?xml version='1.0' encoding='utf-8'?>
+<TEI xmlns="http://www.tei-c.org/ns/1.0">
+    <teiHeader>
+        <fileDesc>
+            <titleStmt>
+                <title>Humboldt – Folio 4v</title>
+            </titleStmt>
+            <publicationStmt>
+                <publisher>Humboldt – The Inaccurate Edition (generated)</publisher>
+                <availability>
+                    <licence target="https://creativecommons.org/licenses/by-sa/4.0/">Creative Commons Attribution-ShareAlike 4.0 International</licence>
+                </availability>
+            </publicationStmt>
+            <sourceDesc>
+                <bibl>Automated transcription of Humboldt – Folio 4v by Alexander von Humboldt, produced by the Humboldt – The Inaccurate Edition pipeline.</bibl>
+            </sourceDesc>
+        </fileDesc>
+        <profileDesc>
+            <creation>
+                <date>2026-06-29</date>
+            </creation>
+        </profileDesc>
+    </teiHeader>
+    <text>
+        <body>
+            <pb n="4v" facs="H0017682__4v.jpg" />
+            <fw type="folNum">6.</fw>
+            <div type="diaryEntry">
+                <p>22 Lich. tartareus, dem völlig<lb />ähnlich den ich in <placeName ref="Deutschland">Teutschland</placeName>
+                </p>
+                <note hand="#author" place="right">
+                    <p>von <persName ref="Christian Friedrich Hammer">Hammer</persName> sehr</p>
+                </note>
+                <del rendition="#s">
+                    <del rendition="#s">die einzige Verbindung</del>
+                    <lb />
+                    <del rendition="#s">bei <placeName ref="Grafschaft Mark">Mark</placeName> u. <placeName ref="Schaffhausen">Schafhausen</placeName>
+                    </del>
+                    <lb />
+                    <del rendition="#s">in der <placeName ref="Schafmatt">Schafmatt</placeName>.</del>
+                </del>
+                <p>2) L. tartareus wird häufig<lb />in <placeName ref="Yorkshire">Yorkshire</placeName> u. im <placeName ref="Peak District">Peak</placeName>
+                    <lb />in <placeName ref="Derbyshire">Derbysh.</placeName> gesammelt, nach<lb />
+                    <placeName ref="Manchester">Manchester</placeName> gebracht u. dort<lb />in den Fabriken th. ver-<lb />kauft. Er giebt mit Urin coquirt / wie L. saxatilis<lb />L. calcar. u Verruc. pertusa / eine schöne purpurrothe Far-<lb />be, bei der man die Thon-<lb />erde u Kupfervitriol / (L. Roc- cella u L. Parell.) entbehren<lb />kann.</p>
+                <note hand="#author" place="right">
+                    <p>?</p>
+                </note>
+                <p>L. calcar. L. saxatil. L. tar-<lb />tar. u Ver. pertusa wachsen fast im ganzen nördlichen <placeName>Europa</placeName> wild - aber man sucht die gabroitischen Schichten</p>
+            </div>
+        </body>
+    </text>
+</TEI>
