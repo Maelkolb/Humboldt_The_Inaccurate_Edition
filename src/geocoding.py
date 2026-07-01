@@ -219,6 +219,34 @@ def geocode_location(
     return result
 
 
+def geocode_query(
+    query: str,
+    cache: Optional[Dict[str, Optional[Dict]]] = None,
+    session: Optional[requests.Session] = None,
+    delay: float = 1.0,
+) -> Optional[Dict]:
+    """Resolve a single ad-hoc query string (e.g. an LLM-suggested corrected/
+    disambiguated place name), honoring the shared cache and the same
+    cross-folio lock/rate-limit as :func:`geocode_entities`.
+
+    Unlike :func:`geocode_entities`, *query* need not come from NER — it's
+    typically a corrected search string proposed by :func:`src.geo_consistency
+    .validate_locations` after the original name resolved implausibly.
+    """
+    if cache is not None and query in cache:
+        return cache[query]
+
+    sess = session or requests.Session()
+    with _GEO_LOCK:
+        if cache is not None and query in cache:
+            return cache[query]  # filled by another thread while we waited
+        result = geocode_location(query, session=sess)
+        if cache is not None:
+            cache[query] = result
+        time.sleep(delay)
+        return result
+
+
 def geocode_entities(
     entities: List[Entity],
     cache: Optional[Dict[str, Optional[Dict]]] = None,

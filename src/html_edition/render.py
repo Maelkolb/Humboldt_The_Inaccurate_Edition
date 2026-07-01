@@ -6,7 +6,10 @@ import html as html_lib
 from typing import Dict, List, Optional, Tuple
 
 from ..models import Entity, Region, is_opposite_marginal
-from .markup import authority_source, find_entity_spans, postprocess_editorial, render_block, render_plain
+from .markup import (
+    authority_source, find_entity_spans, postprocess_editorial, render_block,
+    render_plain, strip_editorial_markers,
+)
 from .textcmp import render_diff, render_gt_plain
 
 LANG_NAMES = {"de": "German", "fr": "French", "la": "Latin", "es": "Spanish"}
@@ -31,9 +34,13 @@ def _annotate_text(
         if s > cur:
             parts.append(render_plain(text[cur:s]))
         color = ec.get(ent.entity_type, ENTITY_FALLBACK_COLOR)
-        ctx = html_lib.escape(ent.context or "")
+        # Tooltip text must be plain — strip this project's editorial marker
+        # syntax (~~struck~~, <u>, [?]) before it goes into a `title="..."`
+        # attribute, or postprocess_editorial's later regex pass will inject
+        # a real tag *inside* the attribute value and corrupt the markup.
+        ctx = html_lib.escape(strip_editorial_markers(ent.context))
         norm = (
-            f" → {html_lib.escape(ent.normalized_form)}"
+            f" → {html_lib.escape(strip_editorial_markers(ent.normalized_form))}"
             if ent.normalized_form else ""
         )
         surface = render_plain(text[s:e])
@@ -47,7 +54,7 @@ def _annotate_text(
             src = authority_source(auth_uri or link)
             bits = [f"{html_lib.escape(ent.entity_type)}: {ctx}{norm}"]
             if auth_label:
-                bits.append(f"⟶ {html_lib.escape(auth_label)}")
+                bits.append(f"⟶ {html_lib.escape(strip_editorial_markers(auth_label))}")
             ref = ent.ehd_id if getattr(ent, "ehd_id", None) else ""
             tail = " · ".join(x for x in (f"{src}" if src else "", ref) if x)
             if tail:

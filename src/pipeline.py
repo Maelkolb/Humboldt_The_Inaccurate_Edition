@@ -317,6 +317,7 @@ def process_page(
             locations, geo_validation = validate_locations(
                 client, locations, entities, full_text,
                 model_id=geo_val_model, thinking_level=geo_val_thinking,
+                geo_cache=geo_cache,
             )
         return full_text, entities, locations, geo_validation
 
